@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Envs
+.venv/
+venv/
+.env
+.env.*
+
+# OS / IDE
+.DS_Store
+.idea/
+
+# Data / artifacts (large; keep out of git) — root-anchored so it doesn't
+# swallow src/.../sql/data/
+/data/
+*.parquet
+*.csv
+catalog_images/
