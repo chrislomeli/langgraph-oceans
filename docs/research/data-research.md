@@ -42,4 +42,87 @@
   
   So: download Happywhale today; spend the recon proving/refuting the hub join; defer AIS and SARs. Want me to drop this dataset checklist into the note's "Next step" section so it's there when you start?
 
-✻ Churned for 1m 4s
+---
+
+## Recon results — RESOLVED 2026-06-04, then CORRECTED 2026-06-04
+
+**Go/no-go on the per-individual hub join: GO — the open hub exists.**
+
+> ⚠️ This section was first written as a **NO-GO** (see "How the first
+> conclusion was wrong," below). Loading the actual OBIS-SEAMAP datasets into
+> Postgres overturned it. The hub is real, open, and richer than hoped. The
+> earlier NO-GO is preserved as a record of the reasoning, but it is **wrong** —
+> read the correction first.
+
+### The finding: Happywhale publishes its encounter data INTO OBIS-SEAMAP, openly
+
+OBIS-SEAMAP hosts **Happywhale-contributed datasets** (`institution = Happywhale`,
+`provider = "<person> via Happywhale.com"`) that carry the full Darwin Core
+schema — including the per-individual fields that the generic species-occurrence
+download lacks. Verified directly in the data:
+
+| Field | Value | Meaning |
+|---|---|---|
+| `organism_id` | `https://happywhale.com/individual/88422` | **stable per-individual identifier** (the whale's HW profile) |
+| `external_resource` | `https://au-hw-media-m.happywhale.com/<uuid>.jpg` | **the actual fluke photo** for that encounter (medium, ~117 KB) |
+| `external_resource_thumb` | `…-t.happywhale.com/<uuid>.jpg` | thumbnail of same (~6 KB) |
+| `latitude` / `longitude` / `date_time` | real | where/when of that sighting |
+
+So a **single open dataset** gives the entire bridge in one namespace:
+`organism_id (identity) → many (date, lat/lon) rows → + photo URL`.
+
+**The numbers (humpback `dataset_1765` alone):** 206,685 sightings · 192,156 with
+`organism_id` · **31,979 distinct individuals** · **20,550 seen >1×** (real
+encounter histories) · up to **703 sightings on one animal** · ~11k seen once
+(a natural open-set tail). The user's PNW-2020+ query returned 111,083 humpback
+rows with `organism_id`.
+
+**Verifications (all green):**
+- ✅ `organism_id` is a real, repeating per-individual key with multi-sighting histories.
+- ✅ photo URLs publicly fetchable (`HTTP 200`, `image/jpeg`; no auth, CORS-open).
+- ✅ **license open and clean:** of identified rows, **CC0 ≈ 107,202** (public
+  domain) plus ~6,900 other Creative Commons (BY / BY-SA / BY-NC / BY-NC-SA);
+  exclude ~33 BY-NC-**ND**, ~2,201 blank, ~277 "no use without permission."
+  Filter: `license LIKE '%creativecommons%' OR license LIKE '%publicdomain%'`
+  (or CC0-only for zero strings attached). Attribution via `provider` /
+  `rights_holder`.
+
+This is **legitimate and reproducible** — published to a public biodiversity
+repository under open licenses, `external_resource` is the Darwin-Core associated-
+media link *meant* to be fetched. NOT scraping the gated platform.
+
+### Decision (corrected)
+1. **The real per-individual project is fully unblocked.** Identity + sightings +
+   ranges + fetchable photos, all real, one namespace, openly licensed. **No
+   synthetic linkage needed** (the earlier fabrication plan is dropped).
+2. **The emergent agent is back on real data:** disambiguation across real
+   look-alikes, multi-hop *individual* range → AIS, open-set recovery on the real
+   single-sighting tail.
+3. **Kaggle `train.csv` is now optional** — its anonymized hashes do **not** join
+   to `organism_id` (different namespace, renamed images). Keep only as extra
+   embedder-training images + the public leaderboard benchmark; the catalog is
+   built from the OBIS-Happywhale images (`external_resource`), which carry real
+   IDs *and* locations.
+
+### How the first conclusion was wrong (kept as the lesson)
+The initial recon checked the **front doors** and called it NO-GO:
+
+| Source | Status | Still true? |
+|---|---|---|
+| Happywhale **platform** | gated (no API, view-only) | ✅ true — but irrelevant: the data flows *out* to OBIS openly |
+| Flukebook / Wildbook | owned encounters, reciprocal collab | ✅ true |
+| NPPID paper | routes back to Happywhale, MOA, 0% bulk | ✅ true |
+| NARW catalog | data agreement, callosity-ID | ✅ true |
+| OBIS-SEAMAP (generic **species** download) | `organism_id` empty | ✅ true *for that file* |
+
+**The miss:** generalizing "`organism_id` ~empty for cetaceans" from the one
+species-occurrence file, without discovering the **Happywhale-published datasets
+within OBIS-SEAMAP** that populate it richly. The lock was on the platform's front
+door; the data was sitting open in the public repository the whole time. Lesson:
+load the actual datasets and look — provider/institution and the Darwin Core
+extension columns vary per dataset.
+
+### Do NOT scrape Happywhale (still stands)
+The open path above makes scraping unnecessary *and* it remains the wrong move:
+breaks reproducibility, the platform gates data on purpose, and it's a JS SPA over
+a gated API. Use the OBIS-published data, which is the sanctioned, citable source.

@@ -17,7 +17,7 @@ venv/
 
 # Data / artifacts (large; keep out of git) — root-anchored so it doesn't
 # swallow src/.../sql/data/
-/data/
+/src/data/
 *.parquet
 *.csv
 catalog_images/

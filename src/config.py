@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 # name is a property of the application, not of the deployment. It is always
 # forced into the environment by apply_langsmith() regardless of what .env
 # or shell variables say.
-LANGSMITH_PROJECT = "wildfire-simulator"
+LANGSMITH_PROJECT = "oceans-simulator"
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -55,8 +55,7 @@ LANGSMITH_PROJECT = "wildfire-simulator"
 
 class Settings(BaseSettings):
     # ── Database ───────────────────────────────────────────────────────────────
-    postgres_url: str = "postgresql://localhost:5432/wildfire"
-
+    postgres_url: str = "postgresql://localhost:5432/oceans?options=-csearch_path%3Ddatasets,public"
     # ── LLM credentials ───────────────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None

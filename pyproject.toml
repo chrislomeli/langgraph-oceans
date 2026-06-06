@@ -49,7 +49,15 @@ dependencies = [
     "shapely>=2.0",
     "pyproj>=3.6",
     "ipykernel>=7.2.0",
+    "pillow>=12.2.0",
+    "requests>=2.34.2",
+    "pandas>=3.0.3",
+    "sqlalchemy>=2.0.50",
+    "pandas-stubs~=3.0.3",
+    "torch>=2.12.0",
+    "open-clip-torch>=3.3.0",
 ]
+
 
 [dependency-groups]
 dev = [
@@ -72,13 +80,21 @@ ignore = ["E501"]
 known-first-party = ["config", "exceptions", "logging_config", "evals", "llm", "prompts", "stores", "conservation"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/evals", "src/llm", "src/prompts", "src/stores"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/config.py" = "config.py"
-"src/exceptions.py" = "exceptions.py"
-"src/logging_config.py" = "logging_config.py"
-"src/py.typed" = "py.typed"
+# src-layout: strip the "src/" prefix so modules import at top level
+# (config, exceptions, evals, llm, ...). Using sources+include (instead of
+# force-include) keeps editable installs path-based — no physical copies in
+# site-packages that would shadow the live source under src/.
+sources = ["src"]
+include = [
+    "src/config.py",
+    "src/exceptions.py",
+    "src/logging_config.py",
+    "src/py.typed",
+    "src/evals",
+    "src/llm",
+    "src/prompts",
+    "src/stores",
+]
 
 [project.urls]
 Homepage = "https://github.com/chrislomeli/langgraph-oceans"
@@ -88,3 +104,5 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
 pythonpath = ["src"]
+
+

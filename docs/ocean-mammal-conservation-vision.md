@@ -159,6 +159,15 @@ multi-tool agentic trace.
 **individual-level** content (sighting histories, named individuals). Design the
 corpus around that — it's a design choice, not a hard problem.
 
+> ✅ **Confirmed available (recon 2026-06-04):** individual-level content is real
+> and open after all. OBIS-SEAMAP hosts **Happywhale-contributed datasets** with
+> `organism_id` (the individual), `external_resource` (the fluke photo), and real
+> lat/lon/date — one namespace, CC0-dominated license, ~32k humpback individuals
+> (20k+ with multi-sighting histories). So the flow stays **per-individual** as
+> originally designed: photo-ID → that individual's sighting history → range →
+> AIS. No synthetic data, no species-level fallback needed. See
+> `docs/research/data-research.md` (CORRECTED) and `data-build-plan.md`.
+
 ---
 
 ## De-risking: build the tool separable
@@ -693,6 +702,34 @@ Steps 1–2 are all AI, zero plumbing — the direct fix for the wildfire regret
 ---
 
 ## Next step — data reconnaissance spike (before ANY build)
+
+> **RESOLVED 2026-06-04 — go/no-go answered: GO. The per-individual hub exists in
+> open data.** First written as a NO-GO; **overturned** by loading the actual
+> OBIS-SEAMAP datasets (see `docs/research/data-research.md` → CORRECTED, and
+> `data-build-plan.md`).
+>
+> **The finding:** OBIS-SEAMAP hosts **Happywhale-contributed datasets** carrying
+> `organism_id` (stable per-individual id), `external_resource` (the fluke photo,
+> publicly fetchable), and real lat/lon/date — the *entire* identity → history →
+> photo bridge in **one namespace**, **openly licensed** (CC0-dominated). Humpback
+> alone: ~32k individuals, 20k+ with multi-sighting histories, up to 703 sightings
+> on one animal. The platform's front door is gated, but the data flows *out* to
+> the public biodiversity repository — the earlier NO-GO generalized from one
+> species-occurrence file that happened to lack `organism_id`.
+>
+> **Consequences:**
+> - **The per-individual design stands as originally written** — photo-ID → that
+>   individual's sighting history → range → AIS, on **real** data.
+> - **Emergent disambiguation (§"showcase of genuine agency") is back** — real
+>   look-alikes with real location histories to cross-reference.
+> - **No synthetic data, no species-level fallback, no scraping, no data request.**
+>   The legitimate open source *is* the hub; reproducible and citable.
+> - **Kaggle is now optional** (embedder training / leaderboard only; its
+>   anonymized hashes do not join `organism_id`).
+>
+> Open questions below (real bar, species/region, open-set) resolve toward the
+> **real per-individual** project; species = humpback, region = SB Channel or
+> Salish Sea (pending a per-region count).
 
 The riskiest assumption in the whole design is that the **individual-level hub
 join exists in public data**: photo-ID `individual_id` → that individual's
