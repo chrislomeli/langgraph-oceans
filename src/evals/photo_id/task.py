@@ -9,25 +9,25 @@ and tokenless: Usage is always zero, and one sample per case suffices (repeats=1
 from __future__ import annotations
 
 from evals.framework.core import Usage
-from models.image_embedder import EMBEDDER_VER
 from tools.photo_id import PhotoIDResult, PhotoIDTool
 
 
 class PhotoIDTask:
     """Task[PhotoIDInput, PhotoIDResult] — drive photo_id from a frozen split case."""
 
-    label = f"photo_id-{EMBEDDER_VER}"  # the experiment identity; LoRA reruns get a new ver → new label
-
     def __init__(self, tool: PhotoIDTool | None = None, k: int = 10):
         # No embedder needed: we query by STORED vector. The tool loads CLIP lazily,
         # so this never pays the model-load cost.
         self.tool = tool or PhotoIDTool()
+        # the experiment identity; LoRA reruns get a new ver → new label.
+        # Taken from the tool so it reflects the actually-active version.
+        self.label = f"photo_id-{self.tool.ver}"
         self.k = k  # return top-k individuals so Recall@1 and Recall@5 both read the same list
 
     def _fetch_vector(self, sighting_id: int):
         rows = self.tool.gw.fetch_rows(
             "SELECT embedding FROM fluke_embeddings WHERE sighting_id = %s AND embedder_ver = %s",
-            (sighting_id, EMBEDDER_VER),
+            (sighting_id, self.tool.ver),
         )
         return rows[0]["embedding"] if rows else None
 

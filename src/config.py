@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # Where the downloaded fluke JPEGs live, laid out <individual_id>/<sighting_id>.jpg.
     # Lives OUTSIDE the repo so blobs never land in git. Override via IMAGE_ROOT.
     image_root: Path = Path.home() / "Source/DATA/oceans/images"
+    # ── Embedder identity ───────────────────────────────────────────────────────
+    # Selects which model produces vectors AND the tag stamped on every catalog row;
+    # must be a key in image_embedder.EMBEDDERS. Flip it (e.g. EMBEDDER_VER=bioclip-v1
+    # in .env) to A/B a different model without editing code, then re-run embed_images.
+    embedder_ver: str = "clip-vitb32-v1"
     # ── LLM credentials ───────────────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None

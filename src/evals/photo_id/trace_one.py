@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import sys
 
-from models.image_embedder import EMBEDDER_VER
 from stores.postgres import get_pg_gateway
 from tools.photo_id import PhotoIDTool, _search_nearest_images
 
@@ -22,6 +21,7 @@ from tools.photo_id import PhotoIDTool, _search_nearest_images
 def main() -> None:
     gw = get_pg_gateway()
     tool = PhotoIDTool()
+    ver = tool.ver  # the active embedder version (from Settings) drives every query below
 
     # ── STEP 0: the case, read from the FROZEN split table ────────────────────
     # This is what dataset.py turns into a Case. We did NOT choose it now — it was
@@ -48,7 +48,7 @@ def main() -> None:
         """SELECT count(*) AS n FROM fluke_embeddings
            WHERE individual_id = %s AND embedder_ver = %s 
              AND sighting_id <> %s""",
-        (true_id, EMBEDDER_VER, held_out_sighting),
+        (true_id, ver, held_out_sighting),
     )[0]["n"]
     print(f"\nSTEP 1 — the gallery: {gallery} OTHER photos of this whale remain in the catalog")
     print("  (a fair test: the whale IS still findable — just not via the hidden photo)")
@@ -58,18 +58,18 @@ def main() -> None:
     # read the 512-number fingerprint. This is task.py's _fetch_vector().
     qvec = gw.fetch_rows(
         "SELECT embedding FROM fluke_embeddings WHERE sighting_id = %s AND embedder_ver = %s",
-        (held_out_sighting, EMBEDDER_VER),
+        (held_out_sighting, ver),
     )[0]["embedding"]
     print(f"\nSTEP 2 — the held-out photo as a vector: {len(qvec)} numbers (CLIP's 'fingerprint')")
     print(f"  first 5 of 512: {[round(float(x), 3) for x in qvec[:5]]}")
 
-    no_holds = _search_nearest_images(gw, qvec, n=12)
+    no_holds = _search_nearest_images(gw, qvec, ver, n=12)
 
 
     # ── STEP 3: nearest IMAGES in the catalog (raw cosine kNN, hidden one excluded) ─
     # This is the actual vector search (photo_id._search_nearest_images). It returns
     # individual images ranked by similarity. Watch: are the top hits the SAME whale?
-    rows = _search_nearest_images(gw, qvec, n=12, exclude_sighting_id=held_out_sighting)
+    rows = _search_nearest_images(gw, qvec, ver, n=12, exclude_sighting_id=held_out_sighting)
     print("\nSTEP 3 — the 12 nearest IMAGES by cosine similarity (the hidden photo excluded):")
     print("   rank  score   individual   same whale?")
     for i, r in enumerate(rows, 1):

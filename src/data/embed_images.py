@@ -12,7 +12,7 @@ from pathlib import Path
 from pgvector import Vector
 
 from config import get_settings
-from models.image_embedder import EMBEDDER_VER, ImageEmbedder
+from models.image_embedder import ImageEmbedder
 from stores.postgres import get_pg_gateway
 
 log = logging.getLogger(__name__)
@@ -27,14 +27,15 @@ def resolve_path(asset_ref: str, image_root: Path) -> str:
         rel = Path(*rel.parts[1:])
     return str(image_root / rel)
 
-# The model identity (MODEL_NAME / EMBEDDER_VER / DIM) and the embed math now live
-# in the Layer-5 ImageEmbedder, so this build job and the photo_id tool embed
-# IDENTICALLY. This script's job is just plumbing: pick pending rows → embed → write.
+# The model identity (model/dim) and the embed math now live in the Layer-5
+# ImageEmbedder, so this build job and the photo_id tool embed IDENTICALLY. The
+# active version comes from Settings; this script just plumbs it through: pick
+# pending rows → embed → write, all stamped with the embedder's own .ver.
 BATCH_SIZE = 32
 LIMIT = None   # smoke test on N images; set to None for the full run
 
 
-def read_pending(gw):
+def read_pending(gw, ver: str):
     """Generator: sightings that still need a vector at THIS embedder_ver.
 
     Joins manifest -> sightings for the license filter, and excludes any
@@ -54,7 +55,7 @@ def read_pending(gw):
           """
     # TODO: stream these (server-side cursor) if the result set is large;
     #       for ~110k small rows, fetch_rows is fine.
-    yield from gw.fetch_rows(sql, (EMBEDDER_VER,))
+    yield from gw.fetch_rows(sql, (ver,))
 
 
 def batched(iterable, n):
@@ -80,8 +81,8 @@ def embed_batch(rows, embedder: ImageEmbedder, image_root: Path) -> list:
     return [(path_to_row[p], vec) for p, vec in pairs]
 
 
-def write_batch(gw, pairs) -> None:
-    """Insert (identity + vector) rows into fluke_embeddings."""
+def write_batch(gw, pairs, ver: str) -> None:
+    """Insert (identity + vector) rows into fluke_embeddings, stamped with `ver`."""
     if not pairs:
         return
     sql = """
@@ -97,7 +98,7 @@ def write_batch(gw, pairs) -> None:
             row["asset_ref"],
             row["source_url"],
             Vector(vec),  # wrap the plain list so pgvector stores it as a vector
-            EMBEDDER_VER,
+            ver,
         )
         for row, vec in pairs
     ]
@@ -110,17 +111,18 @@ def main() -> None:
     settings = get_settings()
     settings.apply_hf()  # export HF_TOKEN so Hub downloads are authenticated
     image_root = settings.image_root
-    embedder = ImageEmbedder()
+    embedder = ImageEmbedder(ver=settings.embedder_ver)
+    ver = embedder.ver  # stamp/filter with the embedder's OWN version → can't drift
     gw = get_pg_gateway()
 
-    source = read_pending(gw)
+    source = read_pending(gw, ver)
     if LIMIT:
         source = itertools.islice(source, LIMIT)
 
     done = 0
     for rows in batched(source, BATCH_SIZE):
         pairs = embed_batch(rows, embedder, image_root)
-        write_batch(gw, pairs)
+        write_batch(gw, pairs, ver)
         done += len(pairs)
         log.info("embedded %d", done)
 

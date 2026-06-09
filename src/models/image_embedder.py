@@ -21,11 +21,12 @@ log = logging.getLogger(__name__)
 
 
 # --- the embedder registry: version tag → how to build that model ---------------
-# EMBEDDER_VER is the one knob. It is BOTH the value stamped on every catalog row
-# AND the key that selects which model/weights produce those vectors — so a row's
-# vector and the model that made it can never drift apart. To A/B a new model:
-# add an entry here, point EMBEDDER_VER at it, and re-run embed_images.py (it sees
-# every sighting as pending at the new version and re-embeds alongside the old).
+# A version tag is BOTH the value stamped on every catalog row AND the key that
+# selects which model/weights produce those vectors — so a row's vector and the
+# model that made it can never drift apart. The ACTIVE tag lives in Settings
+# (embedder_ver, override via the EMBEDDER_VER env var); this module just maps a
+# tag → build spec. To A/B a new model: add an entry here, point Settings at it,
+# and re-run embed_images.py (it re-embeds alongside the old version).
 @dataclass(frozen=True)
 class EmbedderSpec:
     model_name: str          # open_clip architecture ("ViT-B-32") or "hf-hub:<repo>"
@@ -39,9 +40,13 @@ EMBEDDERS: dict[str, EmbedderSpec] = {
     "bioclip-v1": EmbedderSpec("hf-hub:imageomics/bioclip", None, 512),
 }
 
-EMBEDDER_VER = "clip-vitb32-v1"  # ← the active version: switch this to re-embed
-SPEC = EMBEDDERS[EMBEDDER_VER]
-DIM = SPEC.dim  # MUST equal the vector(DIM) column on fluke_embeddings
+
+def resolve_spec(ver: str) -> EmbedderSpec:
+    """Map a version tag → its build spec, with a clear error for unknown tags."""
+    try:
+        return EMBEDDERS[ver]
+    except KeyError:
+        raise KeyError(f"unknown embedder_ver {ver!r}; known: {sorted(EMBEDDERS)}") from None
 
 
 def pick_device() -> str:
@@ -53,14 +58,14 @@ def pick_device() -> str:
     return "cpu"
 
 
-def load_model(device: str):
+def load_model(spec: EmbedderSpec, device: str):
     """Load the frozen model + its OWN preprocessing transform (load once, reuse).
 
-    The architecture/weights come from SPEC (selected by EMBEDDER_VER), so the
-    model that runs here is always the one the active version names.
+    The architecture/weights come from `spec` (chosen by the caller's version tag),
+    so the model that runs here is always the one that tag names.
     """
     model, _, preprocess = open_clip.create_model_and_transforms(
-        SPEC.model_name, pretrained=SPEC.pretrained
+        spec.model_name, pretrained=spec.pretrained
     )
     model = model.to(device).eval()  # eval(): inference mode, no dropout/bn updates
     return model, preprocess
@@ -73,24 +78,26 @@ class ImageEmbedder:
     (the build job holds one; the photo_id tool holds one).
     """
 
-    def __init__(self, device: str | None = None):
+    def __init__(self, ver: str, device: str | None = None):
+        self.ver = ver                       # the identity stamped on every vector
+        self.spec = resolve_spec(ver)        # which model/weights this tag means
+        self.dim = self.spec.dim             # expected embedding width
         self.device = device or pick_device()
-        self.model, self.preprocess = load_model(self.device)
-        self.ver = EMBEDDER_VER
+        self.model, self.preprocess = load_model(self.spec, self.device)
         log.info("ImageEmbedder ready (device=%s, ver=%s)", self.device, self.ver)
 
     def _encode(self, tensors: list) -> list[list[float]]:
         """One forward pass over a stacked batch → L2-normalized rows."""
         batch = torch.stack(tensors).to(self.device)  # [N, 3, H, W]
         with torch.no_grad():  # inference: no gradients → faster, less memory
-            feats = self.model.encode_image(batch)  # [N, DIM]
+            feats = self.model.encode_image(batch)  # [N, dim]
             # Guard: the model's real output width must match the version's declared
-            # DIM (and the vector(DIM) column). Catches a mis-specified registry
+            # dim (and the vector(dim) column). Catches a mis-specified registry
             # entry here with a clear error, not as an opaque insert failure later.
-            if feats.shape[-1] != DIM:
+            if feats.shape[-1] != self.dim:
                 raise ValueError(
-                    f"{EMBEDDER_VER!r} produced {feats.shape[-1]}-d embeddings "
-                    f"but DIM={DIM} (and the fluke_embeddings column) expects {DIM}"
+                    f"{self.ver!r} produced {feats.shape[-1]}-d embeddings "
+                    f"but expects {self.dim} (the fluke_embeddings vector column)"
                 )
             feats = feats / feats.norm(dim=-1, keepdim=True)  # unit length → cosine space
         return feats.cpu().tolist()

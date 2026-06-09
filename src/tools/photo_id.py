@@ -27,7 +27,8 @@ import logging
 from pgvector import Vector
 from pydantic import BaseModel, Field
 
-from models.image_embedder import EMBEDDER_VER, ImageEmbedder
+from config import get_settings
+from models.image_embedder import ImageEmbedder
 from stores.postgres import get_pg_gateway
 from tools.contracts import Citation, Filters, ToolResult
 
@@ -70,7 +71,7 @@ class PhotoIDResult(ToolResult):
     threshold: float = ABSTAIN_THRESHOLD  # echoed for eval reproducibility
 
 
-def _search_nearest_images(gw, qvec, n=N_CANDIDATE_IMAGES, exclude_sighting_id=None) -> list[dict]:
+def _search_nearest_images(gw, qvec, ver, n=N_CANDIDATE_IMAGES, exclude_sighting_id=None) -> list[dict]:
     """Top-N nearest catalog IMAGES by cosine — uses the HNSW index.
 
     Joins sightings for the public thumb_url (the multimodal citation target) and,
@@ -95,7 +96,7 @@ def _search_nearest_images(gw, qvec, n=N_CANDIDATE_IMAGES, exclude_sighting_id=N
         ORDER BY fe.embedding <=> %s              -- <=> is cosine distance; HNSW accelerates this
         LIMIT %s
     """
-    params = [qv, EMBEDDER_VER]
+    params = [qv, ver]
     if exclude_sighting_id is not None:
         params.append(exclude_sighting_id)
     params.extend([qv, n])
@@ -134,15 +135,18 @@ class PhotoIDTool:
     workloads (eval) never pay the CLIP load cost.
     """
 
-    def __init__(self, embedder: ImageEmbedder | None = None):
+    def __init__(self, ver: str | None = None, embedder: ImageEmbedder | None = None):
+        # ver defaults from Settings (env-overridable) so A/B needs no code edit;
+        # if an embedder is supplied, defer to ITS version so the two can't disagree.
+        self.ver = embedder.ver if embedder is not None else (ver or get_settings().embedder_ver)
         self._embedder = embedder  # lazy: only needed by query_by_image
         self.gw = get_pg_gateway()
-        log.info("PhotoIDTool ready (ver=%s)", EMBEDDER_VER)
+        log.info("PhotoIDTool ready (ver=%s)", self.ver)
 
     @property
     def embedder(self) -> ImageEmbedder:
         if self._embedder is None:
-            self._embedder = ImageEmbedder()
+            self._embedder = ImageEmbedder(ver=self.ver)
         return self._embedder
 
     def query_by_vector(
@@ -156,7 +160,7 @@ class PhotoIDTool:
         # applied — species/region/date would filter by JOINing fluke_embeddings →
         # sightings → individuals. Deferred to the agent-integration step (the
         # closed-set demo doesn't need it yet); the seam is here so it's free later.
-        rows = _search_nearest_images(self.gw, qvec, exclude_sighting_id=exclude_sighting_id)
+        rows = _search_nearest_images(self.gw, qvec, self.ver, exclude_sighting_id=exclude_sighting_id)
         ranked = _aggregate_to_individuals(rows, k)
 
         top_score = ranked[0].score if ranked else None
@@ -232,7 +236,7 @@ if __name__ == "__main__":
             WHERE embedder_ver = %s GROUP BY individual_id HAVING count(*) >= 6 LIMIT 1)
         LIMIT 1
         """,
-        (EMBEDDER_VER, EMBEDDER_VER),
+        (tool.ver, tool.ver),
     )[0]
     true_individual, query_sighting, qvec = pick["individual_id"], pick["sighting_id"], pick["embedding"]
     print(f"\nquery vector: stored embedding of individual {true_individual}, sighting {query_sighting}")
