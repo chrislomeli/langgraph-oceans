@@ -56,6 +56,8 @@ dependencies = [
     "pandas-stubs~=3.0.3",
     "torch>=2.12.0",
     "open-clip-torch>=3.3.0",
+    "peft>=0.19.1",
+    "transformers>=5.10.2",
 ]
 
 
@@ -92,8 +94,11 @@ include = [
     "src/py.typed",
     "src/evals",
     "src/llm",
+    "src/models",
     "src/prompts",
     "src/stores",
+    "src/tools",
+    "src/training",
 ]
 
 [project.urls]

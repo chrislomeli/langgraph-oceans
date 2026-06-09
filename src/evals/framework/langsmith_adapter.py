@@ -26,7 +26,6 @@ from langsmith.evaluation import EvaluationResults
 
 from evals.framework.core import Case, CaseExecution, DatasetSource, Evaluator, Sample, Task, Usage
 
-
 # ── Serde ───────────────────────────────────────────────────────────────────
 # LangSmith stores inputs/outputs as JSON, so models cross the boundary as
 # dicts. The local runner needs none of this — it scores native objects.
@@ -163,19 +162,32 @@ def run_langsmith_eval(
         max_concurrency: int = 3,
         input_model=None,
         output_model=None,
+        client=None,
 ):
     """Run the eval. LangSmith handles sampling, storage, and the UI.
 
     Results, per-case scores, and run history are visible in the LangSmith
     dashboard. Regression detection is available via the Experiments view.
-    """
-    from langsmith import evaluate
 
-    return evaluate(
+    Evaluator feedback is uploaded by a BACKGROUND sender, so we must drain it
+    before returning: ``results.wait()`` + ``client.flush()``. Without this, a
+    short-lived process tears the sender down on exit and the experiment shows
+    runs with "no feedback" even though scoring ran. We pass our own ``client``
+    so it's the same one we flush.
+    """
+    from langsmith import Client, evaluate
+
+    client = client or Client()
+    results = evaluate(
         make_target(task, input_model=input_model),
         data=dataset_name,
         evaluators=[make_evaluator(e, output_model=output_model) for e in evaluators],
         experiment_prefix=experiment_prefix,
         num_repetitions=num_repetitions,
         max_concurrency=max_concurrency,
+        client=client,
+        blocking=True,
     )
+    results.wait()      # block until targets + evaluators have all run
+    client.flush()      # drain the feedback queue before the caller can exit
+    return results

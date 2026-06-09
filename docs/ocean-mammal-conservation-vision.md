@@ -1,8 +1,42 @@
 # Ocean-Mammal Conservation Agent — Vision Note
 
-> **STATUS: VISIONING. Nothing committed.** A *future* project, after the
-> code-intelligence agent. This note pins the decisions we've firmed up so far
-> and the questions still open. Hold it loosely; revise freely.
+> **STATUS: BUILD UNDERWAY.** The data + photo-ID retrieval layer is being built
+> now; the agent spine and eval follow. This note pins the decisions firmed up so
+> far and the questions still open. Hold it loosely; revise freely.
+
+---
+
+## Build roadmap (technical work items)
+
+> **How to use this:** the **next thing to build is always the first row not
+> marked ✅.** No need to ask "what's next" — read down the Status column.
+> Legend: ✅ done · 🔄 in progress · ⏭️ next · ⬜ later.
+
+| # | Feature (what we build) | Technology (how) | Problem it solves (why) | Status |
+|---|---|---|---|---|
+| | **Phase A — Photo-ID retrieval** *(the separable exhibit)* | | | |
+| 1 | Relational + geo data load | Postgres + PostGIS (`datasets` schema) | Ground-truth identities, sightings, locations, vessel traffic for the agent to reason over | ✅ |
+| 2 | Image acquisition | Python threaded downloader → `blobs/` + `manifest` table | Gets fluke photos onto disk, each linked to its individual/sighting | ✅ |
+| 3 | Image embedding | CLIP ViT-B/32 (PyTorch/MPS) → `pgvector(512)`, stamped `embedder_ver` | Turns each photo into a comparable 512-d "fingerprint" vector | ✅ |
+| 4 | Vector index | pgvector **HNSW** (cosine / `vector_cosine_ops`) | Makes nearest-neighbor search fast (ms) instead of scanning all 114K rows | ✅ |
+| 5 | `photo_id` retrieval | Cosine kNN query, aggregate-by-individual, calibrated **abstain** threshold | "Which catalogued individual is this photo?" → ranked candidates + confidence + `NOVEL` | ✅ |
+| 6 | Eval — **Layer A** (retrieval) | Held-out split; Precision@k / MRR; open-set abstain test | Proves the retriever is accurate *and* won't hallucinate an identity | 🔄 |
+| | **Phase B — The agent spine** *(where "agentic" is earned)* | | | |
+| 7 | Text corpus ingestion | Chunk + text embedder → pgvector (separate **text** vector space) | Builds the knowledge to answer "what's *known* about this individual" | ⬜ |
+| 8 | Tool contracts | Pydantic `BBox` / `Filters` / `Citation` / `ToolResult` | One typed, "dumb" interface the agent learns once; tools never decide control flow | ⬜ |
+| 9 | Retrieval tools | `hybrid_search`, `sighting_lookup`, `vessel_traffic`, `catalog_search` | The agent's capabilities: text RAG, sighting history, AIS range-overlap | ⬜ |
+| 10 | Agent graph **v1→v2→v3** | LangGraph router + ReAct loop + recovery edge | The judgment layer: route · pick tool · judge sufficiency · disambiguate · recover — **the agency** | ⬜ |
+| 11 | Grounded synthesis | LLM synth role + `Citation` provenance | Produces the cited answer with grounding that's *measured*, not assumed | ⬜ |
+| 12 | Eval — **Layer B + C** | Faithfulness scoring + orchestration-trace scoring | Proves answers are grounded **and** the agent routed/recovered correctly ("agentic = a number") | ⬜ |
+| | **Phase C — Optional ML lift** *(the personal learning goal)* | | | |
+| 13 | LoRA fine-tune embedder | Metric learning (ArcFace/triplet) + **LoRA** → re-embed as `...-v2` | Specializes CLIP for fine-grained fluke ID → accuracy lift over baseline, measured against Layer A | ⬜ |
+
+**Reading the phases:** Phase A is a standalone, benchmarkable photo-ID exhibit
+(finishable on its own). Phase B is the orchestration+eval spine that turns it
+into a research *agent* (the center of gravity). Phase C is bounded, optional ML
+that improves one tool's internals without becoming "an ML project." Build A → B,
+slot C in whenever — it re-embeds into a new `embedder_ver`, so it never blocks
+the rest.
 
 ---
 
