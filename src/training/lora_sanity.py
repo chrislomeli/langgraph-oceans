@@ -17,11 +17,14 @@ from __future__ import annotations
 
 import torch
 from transformers import CLIPVisionModelWithProjection
+from peft import LoraConfig, get_peft_model
+
+from config import get_settings
 
 # Same OpenAI ViT-B/32 weights as the v1 baseline; outputs a 512-d image embedding
 # (matches the fluke_embeddings vector(512) column), so v1↔v2 stays comparable.
 HF_MODEL = "openai/clip-vit-base-patch32"
-
+# HF_MODEL = "imageomics/bioclip"
 
 def load_base():
     """The CLIP IMAGE tower + projection head → 512-d embeddings (what we fine-tune)."""
@@ -52,10 +55,20 @@ def wrap_with_lora(model):
     Hint: peft matches target_modules by the layer's *suffix* name, so a short list
     of names like ["q_proj", ...] applies LoRA to that layer in every block.
     """
-    raise NotImplementedError("implement wrap_with_lora() — see the docstring")
+
+
+    config = LoraConfig(
+        r=8,
+        lora_alpha=16,
+        target_modules=["q_proj", "k_proj", "v_proj", "out_proj"],
+        lora_dropout=0.05,
+        bias="none"
+    )
+    return get_peft_model(model, config)
 
 
 def main() -> None:
+    get_settings().apply_hf()
     model = load_base()
     show_linear_targets(model)
 

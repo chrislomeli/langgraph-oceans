@@ -15,9 +15,9 @@ venv/
 .DS_Store
 .idea/
 
-# Data / artifacts (large; keep out of git) — root-anchored so it doesn't
-# swallow src/.../sql/data/
-/src/data/
+# Data / artifacts (large; keep out of git). Image blobs now live OUTSIDE the
+# repo (see Settings.image_root), so we no longer ignore all of /src/data/ —
+# that rule was hiding the pipeline source. Only the data files are kept out.
 *.parquet
 *.csv
 catalog_images/

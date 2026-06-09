@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -56,9 +57,14 @@ LANGSMITH_PROJECT = "oceans-simulator"
 class Settings(BaseSettings):
     # ── Database ───────────────────────────────────────────────────────────────
     postgres_url: str = "postgresql://localhost:5432/oceans?options=-csearch_path%3Ddatasets,public"
+    # ── Image catalog on disk ───────────────────────────────────────────────────
+    # Where the downloaded fluke JPEGs live, laid out <individual_id>/<sighting_id>.jpg.
+    # Lives OUTSIDE the repo so blobs never land in git. Override via IMAGE_ROOT.
+    image_root: Path = Path.home() / "Source/DATA/oceans/images"
     # ── LLM credentials ───────────────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
+    hf_token: SecretStr | None = None
     ollama_base_url: str = "http://localhost:11434"
 
     # ── AWS Bedrock ───────────────────────────────────────────────────────────
@@ -110,6 +116,17 @@ class Settings(BaseSettings):
         # Project: code always wins
         os.environ["LANGSMITH_PROJECT"] = LANGSMITH_PROJECT
         os.environ["LANGCHAIN_PROJECT"] = LANGSMITH_PROJECT
+
+    def apply_hf(self) -> None:
+        """Export the Hugging Face token into os.environ as HF_TOKEN.
+
+        huggingface_hub / transformers auto-detect the HF_TOKEN environment
+        variable, but values loaded from AI_ENV_FILE live only on this
+        Settings instance — they are never written to the real environment.
+        This bridges that gap. Real env wins if HF_TOKEN is already set.
+        """
+        if self.hf_token and not os.environ.get("HF_TOKEN"):
+            os.environ["HF_TOKEN"] = self.hf_token.get_secret_value()
 
 
 def get_settings() -> Settings:

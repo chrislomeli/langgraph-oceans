@@ -11,6 +11,7 @@ We are NOT training the model — this is pure inference (image → 512 numbers)
 """
 
 import logging
+from dataclasses import dataclass
 
 import open_clip
 import torch
@@ -18,11 +19,29 @@ from PIL import Image
 
 log = logging.getLogger(__name__)
 
-# --- the identity of this embedding run (stamped on every catalog row) ---
-MODEL_NAME = "ViT-B-32"
-PRETRAINED = "openai"
-EMBEDDER_VER = "clip-vitb32-v1"  # the version tag; a query must match the catalog's
-DIM = 512  # MUST equal the vector(DIM) column on fluke_embeddings
+
+# --- the embedder registry: version tag → how to build that model ---------------
+# EMBEDDER_VER is the one knob. It is BOTH the value stamped on every catalog row
+# AND the key that selects which model/weights produce those vectors — so a row's
+# vector and the model that made it can never drift apart. To A/B a new model:
+# add an entry here, point EMBEDDER_VER at it, and re-run embed_images.py (it sees
+# every sighting as pending at the new version and re-embeds alongside the old).
+@dataclass(frozen=True)
+class EmbedderSpec:
+    model_name: str          # open_clip architecture ("ViT-B-32") or "hf-hub:<repo>"
+    pretrained: str | None   # open_clip pretrained tag; None for hf-hub checkpoints
+    dim: int                 # embedding width; MUST equal the vector(DIM) column
+
+
+EMBEDDERS: dict[str, EmbedderSpec] = {
+    "clip-vitb32-v1": EmbedderSpec("ViT-B-32", "openai", 512),
+    # bioCLIP — native open_clip ViT-B/16 trained on TreeOfLife-10M; still 512-d.
+    "bioclip-v1": EmbedderSpec("hf-hub:imageomics/bioclip", None, 512),
+}
+
+EMBEDDER_VER = "clip-vitb32-v1"  # ← the active version: switch this to re-embed
+SPEC = EMBEDDERS[EMBEDDER_VER]
+DIM = SPEC.dim  # MUST equal the vector(DIM) column on fluke_embeddings
 
 
 def pick_device() -> str:
@@ -35,9 +54,13 @@ def pick_device() -> str:
 
 
 def load_model(device: str):
-    """Load the frozen model + its OWN preprocessing transform (load once, reuse)."""
+    """Load the frozen model + its OWN preprocessing transform (load once, reuse).
+
+    The architecture/weights come from SPEC (selected by EMBEDDER_VER), so the
+    model that runs here is always the one the active version names.
+    """
     model, _, preprocess = open_clip.create_model_and_transforms(
-        MODEL_NAME, pretrained=PRETRAINED
+        SPEC.model_name, pretrained=SPEC.pretrained
     )
     model = model.to(device).eval()  # eval(): inference mode, no dropout/bn updates
     return model, preprocess
@@ -61,6 +84,14 @@ class ImageEmbedder:
         batch = torch.stack(tensors).to(self.device)  # [N, 3, H, W]
         with torch.no_grad():  # inference: no gradients → faster, less memory
             feats = self.model.encode_image(batch)  # [N, DIM]
+            # Guard: the model's real output width must match the version's declared
+            # DIM (and the vector(DIM) column). Catches a mis-specified registry
+            # entry here with a clear error, not as an opaque insert failure later.
+            if feats.shape[-1] != DIM:
+                raise ValueError(
+                    f"{EMBEDDER_VER!r} produced {feats.shape[-1]}-d embeddings "
+                    f"but DIM={DIM} (and the fluke_embeddings column) expects {DIM}"
+                )
             feats = feats / feats.norm(dim=-1, keepdim=True)  # unit length → cosine space
         return feats.cpu().tolist()
 
