@@ -8,7 +8,58 @@
 > see X" — so you're never guessing whether it worked. When a checkpoint passes, ping
 > me and I'll deliver the next part. Stuck on a wall? Ping me — this isn't abandonment.
 
-Design rationale lives in `lora-design-note.md`. This file is the hands-on path.
+Design rationale lives in `lora-design-note.md`; the build-level spec for the trainer
+in `lora-train-design.md`. This file is the hands-on path.
+
+---
+
+## ✅ The checklist — start here each day
+
+Work top to bottom. The first unchecked box is where you start. Mark `[x]` as you
+finish so the trail of where we've been stays visible.
+
+**Foundations & decisions — DONE (this session)**
+- [x] **Part 0 — LoRA wiring** passes (`lora_sanity.py`: 0.67% trainable, base frozen, grads flow)
+- [x] **A/B machinery** — `embedder_ver` flows through `Settings` (swap models via env, no code edit)
+- [x] **Catalog plumbing** — `image_root` config · `.gitignore` fix · `apply_hf()` token · dim guard
+- [x] **Decisions locked** — base = OpenAI CLIP · holdout = by-individual · framework = transformers+peft · loss = **SupCon** (batch-hard triplet collapsed — see 2026-06-11 note below)
+- [x] **Split written** — `build_reid_split.sql` (by-individual; train ≥2, val/test ≥4 photos)
+- [x] **Design note written** — `lora-train-design.md` (interfaces + build order)
+
+**Set up the measuring rig — the next thing to do**
+- [x] **Create the split table** — `build_reid_split.sql` → `datasets.reid_split` (built + verified: train 11,789 / val 1,188 / test 1,136 individuals; val/test one held-out query each)
+- [x] **HF backend** — `EmbedderSpec` has `backend`/`adapter_path`; `ImageEmbedder._load_hf` done; `hf_backend_check.py` PASSED (512-d, unit-norm, cosine 0.967 vs open_clip)
+- [~] **Clean baseline** — DECISION CHANGED: do NOT full-embed `clip-hf-vitb32-v1` (~same near-floor number, 9× the work). Reuse the already-embedded `clip-vitb32-v1` as the baseline, scored on `reid_split` test. Only embed the LoRA ver. *(do the HF-loader-pure baseline later, only if the lift is marginal)*
+- [ ] **Wire eval to the split** ← **NEXT** — load `split='test'` cases; scope the gallery to test whales (exact, not HNSW)
+- [ ] **Record the baseline** — run the by-individual eval on `clip-vitb32-v1` → write down baseline `reid@1`
+
+**Viability spike — does LoRA move the needle? (cheap, ~an afternoon)**
+- [x] **Part 1 — tiny data** — PK sampler done in `training/train_lora.py` (`load_pool` + `sample_batch`, P=8 × K=4 over 30 train whales)
+- [x] **Part 2 — loss + separation** — `train_lora.py` runs; batch-hard triplet **collapsed** (SAME & DIFF both → 1.0); switched to **SupCon** → clean separation (SAME−DIFF gap 0.006 → 0.67). Adapter saved to `artifacts/lora/clip-hf-vitb32-lora-v1/`.
+- [ ] **Part 3 — viability eval** ← needs the eval wired first — embed tiny set (base vs LoRA), run eval → does `reid@1` move on UNSEEN whales?
+
+**The real lift — the payoff**
+- [ ] **Part 4 — scale + lift** — train `clip-hf-vitb32-lora-v1`, re-embed the catalog, full eval vs the baseline → the number
+
+> **Session note — 2026-06-11 (start here tomorrow).**
+> A working trainer exists: `training/train_lora.py` (viability-sized: 30 whales, 200 steps).
+> It trains a LoRA adapter and SAVES it; separation confirmed (SAME−DIFF gap → 0.67).
+> **Next box: "Wire eval to the split"** (`reid-eval-design.md`) — until that's built we
+> CANNOT answer the only question that matters: does the adapter help on whales it never
+> trained on? Build the eval → score `clip-vitb32-v1` (baseline) and `clip-hf-vitb32-lora-v1`
+> on `reid_split` test → compare. That's Part 3 (viability) and then Part 4 (scale up).
+>
+> **Lesson banked today — collapse.** batch-hard triplet drove every embedding to one point
+> (SAME *and* DIFF both → 1.0; loss stuck at the margin). Tell = the **SAME−DIFF gap** stops
+> widening. Cause = triplet pulls many positives but pushes only ONE negative. Fix = SupCon
+> (contrasts against ALL negatives at once → collapse raises the loss). Loss is a swappable
+> one-liner; escalation ladder is triplet → SupCon → ArcFace (don't open with the big gun).
+>
+> **Code reorg today:** `models/` now holds only the shipped `image_embedder.py`. All LoRA /
+> learning code is in `training/`: `lora_model.py` (`get_lora_model` — the shared build),
+> `train_lora.py` (real trainer), `lora_raw.py` + `embed_raw.py` (self-contained references),
+> `lora_sanity.py` + `hf_backend_check.py` (checks). Deleted scratch (`temp1`, `temp_raw`,
+> `overfit_demo`).
 
 ---
 

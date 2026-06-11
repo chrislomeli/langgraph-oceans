@@ -32,12 +32,34 @@ class EmbedderSpec:
     model_name: str          # open_clip architecture ("ViT-B-32") or "hf-hub:<repo>"
     pretrained: str | None   # open_clip pretrained tag; None for hf-hub checkpoints
     dim: int                 # embedding width; MUST equal the vector(DIM) column
+    backend: str = "open_clip"        # "open_clip" | "hf" — which loader builds the model
+    adapter_path: str | None = None   # peft (LoRA) checkpoint dir; only for hf LoRA vers
 
 
 EMBEDDERS: dict[str, EmbedderSpec] = {
-    "clip-vitb32-v1": EmbedderSpec("ViT-B-32", "openai", 512),
+    "clip-vitb32-v1": EmbedderSpec(
+        "ViT-B-32",
+        "openai",
+        512),
     # bioCLIP — native open_clip ViT-B/16 trained on TreeOfLife-10M; still 512-d.
     "bioclip-v1": EmbedderSpec("hf-hub:imageomics/bioclip", None, 512),
+    # HuggingFace CLIP (same OpenAI ViT-B/32 weights, transformers loader). This is the
+    # FAIR baseline for the LoRA lift: LoRA trains on the hf backend (peft can target its
+    # q/k/v/out_proj), so the honest "before" must use the same loader, adapters off.
+    "clip-hf-vitb32-v1": EmbedderSpec(
+        "openai/clip-vit-base-patch32",
+        None,
+        512,
+        backend="hf"),
+    # The trained LoRA version: same hf base + an adapter checkpoint. Registered now so the
+    # seam exists; the adapter dir is produced later (Part 4 / lora_train.py).
+    "clip-hf-vitb32-lora-v1": EmbedderSpec(
+        "openai/clip-vit-base-patch32",
+        None,
+        512,
+        backend="hf",
+        adapter_path="artifacts/lora/clip-hf-vitb32-lora-v1",
+    ),
 }
 
 
@@ -62,12 +84,51 @@ def load_model(spec: EmbedderSpec, device: str):
     """Load the frozen model + its OWN preprocessing transform (load once, reuse).
 
     The architecture/weights come from `spec` (chosen by the caller's version tag),
-    so the model that runs here is always the one that tag names.
+    so the model that runs here is always the one that tag names. Dispatches on
+    `spec.backend`; BOTH branches return the same contract — a model `_encode` knows
+    how to call, and a `preprocess(pil) -> [3,H,W] tensor` callable.
     """
+    if spec.backend == "hf":
+        return _load_hf(spec, device)
+    # open_clip path (today): the original baseline + bioCLIP.
     model, _, preprocess = open_clip.create_model_and_transforms(
         spec.model_name, pretrained=spec.pretrained
     )
     model = model.to(device).eval()  # eval(): inference mode, no dropout/bn updates
+    return model, preprocess
+
+
+def _load_hf(spec: EmbedderSpec, device: str):
+    """transformers CLIP vision tower (+ optional LoRA adapters) — the `hf` backend.
+
+    Returns the SAME (model, preprocess) contract as the open_clip path so the rest of
+    ImageEmbedder is backend-agnostic. The ONE difference we keep visible (the forward
+    call) lives in `_encode`; the annoying shape difference (HF's extra batch dim) is
+    flattened HERE, at the boundary, so the hot loop never branches on backend.
+    """
+    from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection  # noqa: F401
+
+    # TODO(you): build the HF model + processor (the two lines you're here to learn).
+    #   model = CLIPVisionModelWithProjection.from_pretrained(spec.model_name).to(device).eval()
+    #   processor = CLIPImageProcessor.from_pretrained(spec.model_name)
+    # WHY WithProjection: it includes the 512-d visual_projection head, so its
+    # `.image_embeds` matches open_clip's encode_image width AND space. Plain
+    # CLIPVisionModel would hand back the 768-d pre-projection tower output — wrong.
+    model = CLIPVisionModelWithProjection.from_pretrained(spec.model_name).to(device).eval()     # TODO(you)
+    processor = CLIPImageProcessor.from_pretrained(spec.model_name)  # TODO(you)
+
+    # LoRA adapters: only when a checkpoint is registered (Part 4). Seam present now,
+    # untested until then — clip-hf-vitb32-v1 has adapter_path=None, so this is skipped.
+    if spec.adapter_path:
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(model, spec.adapter_path).to(device).eval()
+
+    # Normalize preprocess to the open_clip contract: PIL -> [3,H,W] tensor. HF's
+    # processor returns a dict whose pixel_values are [1,3,H,W]; squeeze the batch dim
+    # so torch.stack in _encode behaves identically for both backends.
+    def preprocess(img):
+        return processor(images=img, return_tensors="pt").pixel_values.squeeze(0)
+
     return model, preprocess
 
 
@@ -81,6 +142,7 @@ class ImageEmbedder:
     def __init__(self, ver: str, device: str | None = None):
         self.ver = ver                       # the identity stamped on every vector
         self.spec = resolve_spec(ver)        # which model/weights this tag means
+        self.backend = self.spec.backend     # "open_clip" | "hf" — selects the encode call
         self.dim = self.spec.dim             # expected embedding width
         self.device = device or pick_device()
         self.model, self.preprocess = load_model(self.spec, self.device)
@@ -90,7 +152,12 @@ class ImageEmbedder:
         """One forward pass over a stacked batch → L2-normalized rows."""
         batch = torch.stack(tensors).to(self.device)  # [N, 3, H, W]
         with torch.no_grad():  # inference: no gradients → faster, less memory
-            feats = self.model.encode_image(batch)  # [N, dim]
+            # The one conceptual difference between backends, kept visible on purpose:
+            # open_clip exposes encode_image(); HF returns image_embeds off the output.
+            if self.backend == "hf":
+                feats = self.model(pixel_values=batch).image_embeds  # → [N, dim]
+            else:
+                feats = self.model.encode_image(batch)  # open_clip (today)        → [N, dim]
             # Guard: the model's real output width must match the version's declared
             # dim (and the vector(dim) column). Catches a mis-specified registry
             # entry here with a clear error, not as an opaque insert failure later.

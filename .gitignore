@@ -21,3 +21,7 @@ venv/
 *.parquet
 *.csv
 catalog_images/
+
+# Trained LoRA adapters (binary; reproducible from training/train_lora.py)
+artifacts/
+src/artifacts/

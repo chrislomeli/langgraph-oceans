@@ -65,7 +65,9 @@ class Settings(BaseSettings):
     # Selects which model produces vectors AND the tag stamped on every catalog row;
     # must be a key in image_embedder.EMBEDDERS. Flip it (e.g. EMBEDDER_VER=bioclip-v1
     # in .env) to A/B a different model without editing code, then re-run embed_images.
-    embedder_ver: str = "clip-vitb32-v1"
+    # embedder_ver: str = "clip-vitb32-v1"
+    embedder_ver: str = "clip-hf-vitb32-v1"
+
     # ── LLM credentials ───────────────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None

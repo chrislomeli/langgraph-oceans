@@ -13,8 +13,8 @@ from PIL.Image import Image
 log = logging.getLogger(__name__)
 
 # --- config (hardcode for a one-off; promote to args later if you want) ---
-CSV_PATH = Path("/Users/chrislomeli/Source/PROJECTS/agenticAI/langgraph-oceans/src/data/oceans_datasets_manifest_fix.csv")
-BLOB_DIR = Path("blobs")  # where the .jpg files land
+CSV_PATH = Path("/Users/chrislomeli/Source/PROJECTS/agenticAI/langgraph-oceans/src/data/oceans_datasets_sightings_full.csv")
+BLOB_DIR = Path("/Users/chrislomeli/Source/DATA/oceans/images")  # where the .jpg files land
 MANIFEST_PATH = Path("manifest.csv")
 MAX_WORKERS = 6  # modest — be polite to the CDN
 TIMEOUT = 10
@@ -73,6 +73,7 @@ def create_retry_session():
 def download_one(task: Task) -> Result:
     """Worker, runs in a thread. Idempotent + one retry. No exceptions escape."""
     if task.dest.exists():
+        print(f"found {task.individual_id}")
         return Result(task, "found")
 
     task.dest.parent.mkdir(parents=True, exist_ok=True)
