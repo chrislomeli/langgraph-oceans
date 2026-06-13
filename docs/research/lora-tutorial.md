@@ -30,16 +30,16 @@ finish so the trail of where we've been stays visible.
 - [x] **Create the split table** — `build_reid_split.sql` → `datasets.reid_split` (built + verified: train 11,789 / val 1,188 / test 1,136 individuals; val/test one held-out query each)
 - [x] **HF backend** — `EmbedderSpec` has `backend`/`adapter_path`; `ImageEmbedder._load_hf` done; `hf_backend_check.py` PASSED (512-d, unit-norm, cosine 0.967 vs open_clip)
 - [~] **Clean baseline** — DECISION CHANGED: do NOT full-embed `clip-hf-vitb32-v1` (~same near-floor number, 9× the work). Reuse the already-embedded `clip-vitb32-v1` as the baseline, scored on `reid_split` test. Only embed the LoRA ver. *(do the HF-loader-pure baseline later, only if the lift is marginal)*
-- [ ] **Wire eval to the split** ← **NEXT** — load `split='test'` cases; scope the gallery to test whales (exact, not HNSW)
-- [ ] **Record the baseline** — run the by-individual eval on `clip-vitb32-v1` → write down baseline `reid@1`
+- [x] **Wire eval to the split** — built 2026-06-12: `restrict_individual_ids` on the tool (exact scan, no HNSW), `ReIDSplitDataset`, `ReIDTask`, `eval.py --split val|test` (`test` guarded by `--final`)
+- [x] **Record the baseline** — `clip-vitb32-v1` on val (1,188 queries, disjoint gallery): **reid@1 = 0.025 · reid@5 = 0.054 · MRR = 0.035** — raw CLIP at the floor, as expected
 
 **Viability spike — does LoRA move the needle? (cheap, ~an afternoon)**
 - [x] **Part 1 — tiny data** — PK sampler done in `training/train_lora.py` (`load_pool` + `sample_batch`, P=8 × K=4 over 30 train whales)
 - [x] **Part 2 — loss + separation** — `train_lora.py` runs; batch-hard triplet **collapsed** (SAME & DIFF both → 1.0); switched to **SupCon** → clean separation (SAME−DIFF gap 0.006 → 0.67). Adapter saved to `artifacts/lora/clip-hf-vitb32-lora-v1/`.
-- [ ] **Part 3 — viability eval** ← needs the eval wired first — embed tiny set (base vs LoRA), run eval → does `reid@1` move on UNSEEN whales?
+- [x] **Part 3 — viability eval** — VIABLE (2026-06-12): val split, 1,188 unseen whales — baseline `reid@1=0.025 / reid@5=0.054 / MRR=0.035` → LoRA (30 whales, 200 steps) `reid@1=0.067 / reid@5=0.146 / MRR=0.095` — **2.7× across the board**
 
 **The real lift — the payoff**
-- [ ] **Part 4 — scale + lift** — train `clip-hf-vitb32-lora-v1`, re-embed the catalog, full eval vs the baseline → the number
+- [x] **Part 4 — scale + lift** — trained `clip-hf-vitb32-lora-v2` (all 11,789 train whales, P16×K4, 3000 steps, cosine LR, best-probe checkpoint). Full val eval: **reid@1 0.277 / reid@5 0.454 / MRR 0.345** — ~11× baseline, ~4× v1. SupCon held; no ArcFace needed. Full record in `lora-experiment-log.md`.
 
 > **Session note — 2026-06-11 (start here tomorrow).**
 > A working trainer exists: `training/train_lora.py` (viability-sized: 30 whales, 200 steps).

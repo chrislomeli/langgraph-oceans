@@ -5,6 +5,7 @@
   at THIS version; switching the version re-embeds without wiping the old.
   """
 
+import argparse
 import itertools
 import logging
 from pathlib import Path
@@ -35,27 +36,37 @@ BATCH_SIZE = 32
 LIMIT = None   # smoke test on N images; set to None for the full run
 
 
-def read_pending(gw, ver: str):
+def read_pending(gw, ver: str, split: str | None = None):
     """Generator: sightings that still need a vector at THIS embedder_ver.
 
     Joins manifest -> sightings for the license filter, and excludes any
-    sighting already embedded at this version (idempotency).
+    sighting already embedded at this version (idempotency). `split` restricts
+    to that reid_split partition's individuals — used to embed just one split's
+    gallery (e.g. val for the LoRA viability check) without paying for the
+    whole catalog.
     """
-    sql = """
+    split_clause = (
+        "AND m.individual_id IN (SELECT individual_id FROM datasets.reid_split WHERE split = %s)"
+        if split is not None
+        else ""
+    )
+    sql = f"""
           SELECT m.sighting_id, m.individual_id, m.asset_ref, m.source_url
           FROM manifest m
                    JOIN sightings s ON s.sighting_id = m.sighting_id
           WHERE s.license NOT LIKE '%%-nd/%%' -- ML-safety: drop no-derivatives
             AND m.status = 'ok'               -- only successfully downloaded
+            {split_clause}
             AND NOT EXISTS ( -- skip already-embedded-at-this-version
               SELECT 1 \
               FROM fluke_embeddings fe
               WHERE fe.sighting_id = m.sighting_id
                 AND fe.embedder_ver = %s) \
           """
+    params = (split, ver) if split is not None else (ver,)
     # TODO: stream these (server-side cursor) if the result set is large;
     #       for ~110k small rows, fetch_rows is fine.
-    yield from gw.fetch_rows(sql, (ver,))
+    yield from gw.fetch_rows(sql, params)
 
 
 def batched(iterable, n):
@@ -108,6 +119,11 @@ def write_batch(gw, pairs, ver: str) -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    ap = argparse.ArgumentParser(description="embed downloaded JPEGs into fluke_embeddings")
+    ap.add_argument("--split", choices=["train", "val", "test"], default=None,
+                    help="restrict to this reid_split partition's individuals (default: whole catalog)")
+    args = ap.parse_args()
+
     settings = get_settings()
     settings.apply_hf()  # export HF_TOKEN so Hub downloads are authenticated
     image_root = settings.image_root
@@ -115,7 +131,7 @@ def main() -> None:
     ver = embedder.ver  # stamp/filter with the embedder's OWN version → can't drift
     gw = get_pg_gateway()
 
-    source = read_pending(gw, ver)
+    source = read_pending(gw, ver, split=args.split)
     if LIMIT:
         source = itertools.islice(source, LIMIT)
 

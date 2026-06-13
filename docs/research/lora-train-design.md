@@ -199,3 +199,23 @@ the durable record.
 
 Step 1 is independent and de-risks the whole thing (proves the hf backend + clean
 baseline before any training). Do it first.
+
+---
+
+## 11. Part-4 scale-up (2026-06-12) — what changes from the viability trainer
+
+Viability (v1: 30 whales, 200 steps, SupCon) proved the lift: val reid@1 0.025 → 0.067.
+The v2 run keeps the SAME loop and loss; only capacity knobs move:
+
+| knob | v1 (viability) | v2 (scale) | why |
+|---|---|---|---|
+| pool | 30 whales | ALL train whales ≥2 photos (~11.8k) | the actual dataset |
+| K shortfall | excluded (<K photos) | sample with replacement | keeps 2–3-photo whales usable |
+| batch | P8×K4 = 32 | P16×K4 = 64 | more in-batch negatives → stronger SupCon |
+| preprocess | whole pool cached once | per-batch, thread pool | 78k images ≈ 47 GB — can't cache |
+| steps / LR | 200 @ 1e-4 | 3000 @ 1e-4, cosine → 1e-5 | longer run wants decay |
+| checkpoint | save at end | probe val-reid@1 every 250 steps, save BEST | a long run can't end worse than its best |
+
+The probe is a cheap in-memory proxy of the real eval: a fixed sample of val whales,
+1 query + 1 gallery photo each, nearest-neighbor reid@1. Decisions made on val only;
+`test` stays sealed for the final number. Output ver: `clip-hf-vitb32-lora-v2`.

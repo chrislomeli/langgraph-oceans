@@ -12,6 +12,7 @@ We are NOT training the model — this is pure inference (image → 512 numbers)
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 import open_clip
 import torch
@@ -53,6 +54,24 @@ EMBEDDERS: dict[str, EmbedderSpec] = {
         backend="hf"),
     # The trained LoRA version: same hf base + an adapter checkpoint. Registered now so the
     # seam exists; the adapter dir is produced later (Part 4 / lora_train.py).
+    # v3: off CLIP — EfficientNetV2-S @384 + ArcFace, 512-d embedding (reuses vector(512)).
+    # The resolution probe showed resolution is the lever; this backbone takes 384px and
+    # trains with the re-ID standard loss. adapter_path is set once train_arcface.py saves.
+    "effnetv2s-arcface-v3": EmbedderSpec(
+        "tf_efficientnetv2_s.in21k_ft_in1k",
+        None,
+        512,
+        backend="timm",
+        adapter_path="artifacts/reid/effnetv2s-arcface-v3.pt",  # trained state_dict
+    ),
+    # Part-4 scaled run (all train whales, P16K4, 3000 steps, best-probe checkpoint).
+    "clip-hf-vitb32-lora-v2": EmbedderSpec(
+        "openai/clip-vit-base-patch32",
+        None,
+        512,
+        backend="hf",
+        adapter_path="artifacts/lora/clip-hf-vitb32-lora-v2",
+    ),
     "clip-hf-vitb32-lora-v1": EmbedderSpec(
         "openai/clip-vit-base-patch32",
         None,
@@ -90,11 +109,33 @@ def load_model(spec: EmbedderSpec, device: str):
     """
     if spec.backend == "hf":
         return _load_hf(spec, device)
+    if spec.backend == "timm":
+        return _load_timm(spec, device)
     # open_clip path (today): the original baseline + bioCLIP.
     model, _, preprocess = open_clip.create_model_and_transforms(
         spec.model_name, pretrained=spec.pretrained
     )
     model = model.to(device).eval()  # eval(): inference mode, no dropout/bn updates
+    return model, preprocess
+
+
+def _load_timm(spec: EmbedderSpec, device: str):
+    """EfficientNetV2-S re-ID model (+ optional trained weights) — the `timm` backend.
+
+    Same (model, preprocess) contract as the other backends. `adapter_path` here points
+    at a saved state_dict (.pt) of trained weights; when absent the backbone is ImageNet-
+    pretrained with a random head (plumbing-smoke only, not a useful embedder yet).
+    """
+    from models.reid_model import ReIDModel, build_preprocess
+
+    model = ReIDModel(backbone=spec.model_name, emb_dim=spec.dim, pretrained=True).to(device).eval()
+    if spec.adapter_path:
+        weights = Path(spec.adapter_path)
+        if not weights.exists():
+            weights = Path(__file__).resolve().parents[1] / spec.adapter_path
+        model.load_state_dict(torch.load(str(weights), map_location=device))
+        model.eval()
+    preprocess = build_preprocess(spec.model_name)
     return model, preprocess
 
 
@@ -117,11 +158,15 @@ def _load_hf(spec: EmbedderSpec, device: str):
     model = CLIPVisionModelWithProjection.from_pretrained(spec.model_name).to(device).eval()     # TODO(you)
     processor = CLIPImageProcessor.from_pretrained(spec.model_name)  # TODO(you)
 
-    # LoRA adapters: only when a checkpoint is registered (Part 4). Seam present now,
-    # untested until then — clip-hf-vitb32-v1 has adapter_path=None, so this is skipped.
+    # LoRA adapters: only when a checkpoint is registered. A relative adapter_path
+    # is resolved against the src package root (where train_lora.py writes), so
+    # loading works no matter what cwd the caller runs from.
     if spec.adapter_path:
         from peft import PeftModel
-        model = PeftModel.from_pretrained(model, spec.adapter_path).to(device).eval()
+        adapter = Path(spec.adapter_path)
+        if not adapter.exists():
+            adapter = Path(__file__).resolve().parents[1] / spec.adapter_path
+        model = PeftModel.from_pretrained(model, str(adapter)).to(device).eval()
 
     # Normalize preprocess to the open_clip contract: PIL -> [3,H,W] tensor. HF's
     # processor returns a dict whose pixel_values are [1,3,H,W]; squeeze the batch dim
@@ -156,6 +201,8 @@ class ImageEmbedder:
             # open_clip exposes encode_image(); HF returns image_embeds off the output.
             if self.backend == "hf":
                 feats = self.model(pixel_values=batch).image_embeds  # → [N, dim]
+            elif self.backend == "timm":
+                feats = self.model(batch)  # ReIDModel.forward            → [N, dim]
             else:
                 feats = self.model.encode_image(batch)  # open_clip (today)        → [N, dim]
             # Guard: the model's real output width must match the version's declared

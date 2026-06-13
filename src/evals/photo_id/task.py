@@ -8,6 +8,8 @@ and tokenless: Usage is always zero, and one sample per case suffices (repeats=1
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from evals.framework.core import Usage
 from tools.photo_id import PhotoIDResult, PhotoIDTool
 
@@ -37,4 +39,37 @@ class PhotoIDTask:
         if qvec is None:
             return None, Usage()  # vector missing → a scored parse-failure, not a crash
         result = self.tool.query_by_vector(qvec, k=self.k, exclude_sighting_id=sid)
+        return result, Usage(total_tokens=0)
+
+
+class ReIDTask(PhotoIDTask):
+    """PhotoIDTask scoped to a disjoint gallery (the by-individual reid eval).
+
+    The eval owns the split knowledge: it loads the split's individual_ids ONCE and
+    this task forwards them on every query, so a val query can never rank a train
+    or test whale (identity leakage at eval time). The tool stays split-ignorant.
+    """
+
+    def __init__(
+        self,
+        *,
+        gallery_individual_ids: Sequence[int],
+        tool: PhotoIDTool | None = None,
+        k: int = 10,
+    ):
+        super().__init__(tool=tool, k=k)
+        self._gallery = list(gallery_individual_ids)
+        self.label = f"reid-{self.tool.ver}"
+
+    async def run(self, task_input: dict) -> tuple[PhotoIDResult | None, Usage]:
+        sid = task_input["query_sighting_id"]
+        qvec = self._fetch_vector(sid)
+        if qvec is None:
+            return None, Usage()
+        result = self.tool.query_by_vector(
+            qvec,
+            k=self.k,
+            exclude_sighting_id=sid,
+            restrict_individual_ids=self._gallery,
+        )
         return result, Usage(total_tokens=0)

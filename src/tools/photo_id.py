@@ -23,6 +23,7 @@ public `thumb_url`, not local files.
 """
 
 import logging
+from collections.abc import Sequence
 
 from pgvector import Vector
 from pydantic import BaseModel, Field
@@ -71,17 +72,26 @@ class PhotoIDResult(ToolResult):
     threshold: float = ABSTAIN_THRESHOLD  # echoed for eval reproducibility
 
 
-def _search_nearest_images(gw, qvec, ver, n=N_CANDIDATE_IMAGES, exclude_sighting_id=None) -> list[dict]:
+def _search_nearest_images(
+    gw, qvec, ver, n=N_CANDIDATE_IMAGES, exclude_sighting_id=None, restrict_individual_ids=None
+) -> list[dict]:
     """Top-N nearest catalog IMAGES by cosine — uses the HNSW index.
 
     Joins sightings for the public thumb_url (the multimodal citation target) and,
     once individuals is bigint-keyed, the individual's name. exclude_sighting_id
     drops that one image (leave-one-out), so a query can't match itself in eval.
+
+    restrict_individual_ids scopes the search to a candidate set (the reid eval's
+    disjoint gallery). That path is EXACT, not HNSW: post-filtering an ANN result
+    would thin the pool and inherit the index's approximation error, so we disable
+    index scans and rank the whole eligible set (a few thousand rows — cheap).
     """
     qv = Vector(qvec)
     # The f-strings inject only FIXED clause strings (no user data); ids still
     # travel as %s parameters, so this is not SQL injection.
     exclude_clause = "AND fe.sighting_id <> %s" if exclude_sighting_id is not None else ""
+    restrict_clause = "AND fe.individual_id = ANY(%s)" if restrict_individual_ids is not None else ""
+    limit_clause = "LIMIT %s" if restrict_individual_ids is None else ""
     sql = f"""
         SELECT fe.individual_id,
                fe.sighting_id,
@@ -93,14 +103,26 @@ def _search_nearest_images(gw, qvec, ver, n=N_CANDIDATE_IMAGES, exclude_sighting
         LEFT JOIN individuals i ON i.individual_id = fe.individual_id
         WHERE fe.embedder_ver = %s
           {exclude_clause}
+          {restrict_clause}
         ORDER BY fe.embedding <=> %s              -- <=> is cosine distance; HNSW accelerates this
-        LIMIT %s
+        {limit_clause}
     """
-    params = [qv, ver]
+    params: list = [qv, ver]
     if exclude_sighting_id is not None:
         params.append(exclude_sighting_id)
-    params.extend([qv, n])
-    return gw.fetch_rows(sql, tuple(params))
+    if restrict_individual_ids is not None:
+        params.append(list(restrict_individual_ids))
+    params.append(qv)
+    if restrict_individual_ids is None:
+        params.append(n)
+        return gw.fetch_rows(sql, tuple(params))
+
+    # Exact path: SET LOCAL only holds within one transaction, so run both
+    # statements on the same borrowed connection.
+    with gw.conn() as conn, conn.cursor() as cur:
+        cur.execute("SET LOCAL enable_indexscan = off")
+        cur.execute(sql, tuple(params))
+        return cur.fetchall()
 
 
 def _aggregate_to_individuals(rows, k=5) -> list[Candidate]:
@@ -155,12 +177,22 @@ class PhotoIDTool:
         k: int = 5,
         filters: Filters | None = None,  # noqa: ARG002 — accepted per the shared contract; see note
         exclude_sighting_id: int | None = None,
+        restrict_individual_ids: Sequence[int] | None = None,
     ) -> PhotoIDResult:
         # NOTE: `filters` is accepted to honor the one-contract rule but not yet
         # applied — species/region/date would filter by JOINing fluke_embeddings →
         # sightings → individuals. Deferred to the agent-integration step (the
         # closed-set demo doesn't need it yet); the seam is here so it's free later.
-        rows = _search_nearest_images(self.gw, qvec, self.ver, exclude_sighting_id=exclude_sighting_id)
+        # `restrict_individual_ids` is the general "search within this candidate
+        # set" seam — the reid eval supplies its split's gallery; the tool stays
+        # ignorant of what a split is.
+        rows = _search_nearest_images(
+            self.gw,
+            qvec,
+            self.ver,
+            exclude_sighting_id=exclude_sighting_id,
+            restrict_individual_ids=restrict_individual_ids,
+        )
         ranked = _aggregate_to_individuals(rows, k)
 
         top_score = ranked[0].score if ranked else None

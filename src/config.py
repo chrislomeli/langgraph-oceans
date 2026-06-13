@@ -65,8 +65,13 @@ class Settings(BaseSettings):
     # Selects which model produces vectors AND the tag stamped on every catalog row;
     # must be a key in image_embedder.EMBEDDERS. Flip it (e.g. EMBEDDER_VER=bioclip-v1
     # in .env) to A/B a different model without editing code, then re-run embed_images.
-    # embedder_ver: str = "clip-vitb32-v1"
-    embedder_ver: str = "clip-hf-vitb32-v1"
+    # Default = v3 (EffNetV2-S @384 + ArcFace): test reid@1 0.62 / MRR 0.67, the best
+    # embedder (see docs/research/lora-experiment-log.md). Prior CLIP vers below stay
+    # registered for A/B; flip via EMBEDDER_VER to compare without a code edit.
+    # embedder_ver: str = "clip-vitb32-v1"          # raw open_clip baseline (floor)
+    # embedder_ver: str = "clip-hf-vitb32-v1"       # HF CLIP base (LoRA's fair baseline)
+    # embedder_ver: str = "clip-hf-vitb32-lora-v2"  # CLIP + LoRA + SupCon (reid@1 0.27)
+    embedder_ver: str = "effnetv2s-arcface-v3"
 
     # ── LLM credentials ───────────────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None

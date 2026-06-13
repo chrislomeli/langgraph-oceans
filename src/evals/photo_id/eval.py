@@ -9,6 +9,10 @@ on its id, the truth is the held-out individual's id, and Span equality reduces 
     uv run python -m evals.photo_id.eval
     uv run python -m evals.photo_id.eval --limit 200        # quick look
 
+    # by-individual GENERALIZATION eval (reid_split; the honest LoRA yardstick):
+    uv run python -m evals.photo_id.eval --split val            # iterate here
+    uv run python -m evals.photo_id.eval --split test --final   # spend ONCE at the end
+
     # push the durable baseline experiment to LangSmith:
     uv run python -m evals.photo_id.eval --langsmith
     uv run python -m evals.photo_id.eval --langsmith --seed-only   # seed dataset only
@@ -30,7 +34,8 @@ from statistics import mean
 from evals.framework.core import CaseExecution, Sample
 from evals.framework.evaluators import RetrievalRanking, Span
 from evals.photo_id.dataset import PhotoIDLeaveOneOut
-from evals.photo_id.task import PhotoIDTask
+from evals.photo_id.reid_dataset import ReIDSplitDataset
+from evals.photo_id.task import PhotoIDTask, ReIDTask
 
 log = logging.getLogger(__name__)
 
@@ -110,12 +115,25 @@ def main() -> None:
                     help="don't run; just check the newest experiment's feedback (use after ingestion lag clears)")
     ap.add_argument("--limit", type=int, default=0, help="cap cases for a LOCAL run (0 = all)")
     ap.add_argument("--k", type=int, default=10, help="candidates returned per query")
+    ap.add_argument("--split", choices=["val", "test"], default=None,
+                    help="run the by-individual reid eval on this reid_split split "
+                         "(omit for the original closed-set leave-one-out)")
+    ap.add_argument("--final", action="store_true",
+                    help="required with --split test — the test set is spent ONCE, at the end")
     args = ap.parse_args()
+
+    if args.split == "test" and not args.final:
+        ap.error("--split test requires --final: iterate on --split val; "
+                 "test is scored once, when the model is frozen.")
 
     # --smoke N: a small, isolated dataset run through LangSmith, then verified.
     smoke = args.smoke > 0
-    dataset = PhotoIDLeaveOneOut(limit=args.smoke) if smoke else PhotoIDLeaveOneOut()
-    task = PhotoIDTask(k=args.k)
+    if args.split:
+        dataset = ReIDSplitDataset(split=args.split, limit=args.smoke)
+        task = ReIDTask(gallery_individual_ids=dataset.gallery_individual_ids(), k=args.k)
+    else:
+        dataset = PhotoIDLeaveOneOut(limit=args.smoke) if smoke else PhotoIDLeaveOneOut()
+        task = PhotoIDTask(k=args.k)
     evaluators = build_evaluators()
 
     if args.langsmith or smoke:
