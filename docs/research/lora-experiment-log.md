@@ -146,6 +146,21 @@ Levers that moved it, in order of impact: **resolution (224→384)** + **ArcFace
 **a real fine-tuned backbone**. Cropping was a non-lever (data already tight). Model size
 alone was a non-lever (capacity probe flat). All decided by cheap probes before the build.
 
+## Model track CLOSED (2026-06-18)
+The full catalog is embedded at the winning model. DB check:
+`SELECT embedder_ver, count(*) FROM fluke_embeddings GROUP BY embedder_ver` →
+`effnetv2s-arcface-v3` = **114,089**, identical to the `clip-vitb32-v1` full-catalog
+baseline (114,089). So v3 covers every status='ok', license-clean image — not just the
+val/test eval galleries. v3 is the active default (`config.py` `embedder_ver`) and the
+`photo_id` tool serves it catalog-wide. Nothing further to train or embed here.
+
+**One open item carried into Phase B:** `tools/photo_id.py ABSTAIN_THRESHOLD` is still
+`0.80` — a CLIP-cosine value. v3 ArcFace correct-match cosines sit ~0.5, so that cutoff
+declares almost everything NOVEL. Ranking metrics are unaffected (eval runs abstain off),
+but the agent must not trust the NOVEL/abstain signal until this is recalibrated on VAL
+only (never test). That's the only loose end between "good embedder" and "agent can rely
+on it."
+
 ## Escalation ladder (if SupCon plateaus below target)
 triplet → **SupCon** (here) → **ArcFace** (additive-angular-margin classification head;
 the standard next gun for face/animal re-ID). BioCLIP is a *fallback base model*, not a
