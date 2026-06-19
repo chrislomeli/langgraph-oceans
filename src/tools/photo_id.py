@@ -40,10 +40,18 @@ log = logging.getLogger(__name__)
 # for a top-5 answer.
 N_CANDIDATE_IMAGES = 50
 
-# Below this cosine similarity, declare NOVEL instead of guessing an identity.
-# PLACEHOLDER — calibrated for real in the Layer-A eval (roadmap item 6). Raw
-# cosine isn't a probability; a real threshold comes from held-out data.
-ABSTAIN_THRESHOLD = 0.80
+# Below this top-1 cosine similarity, declare NOVEL instead of guessing an identity.
+# CALIBRATED on reid_split VAL (2026-06-19, evals/photo_id/calibrate_abstain.py):
+# Youden's-J optimum of genuine vs. impostor top-1 scores under the v3 ArcFace
+# embedder = 0.539 → shipped at 0.54. NOT a confident gate: genuine (median 0.557)
+# and impostor (0.478) distributions overlap heavily, so at this cutoff ~43% of
+# KNOWN whales read as NOVEL and ~16% of NOVEL animals read as a match (balanced
+# acc ~0.70 — the ceiling of open-set detection on a reid@1=0.62 model). The agent
+# (Layer 2) should treat `abstain` as a SOFT prior, corroborated by `margin` and
+# downstream sighting/location evidence — never as a verdict. Recalibrate if the
+# embedder changes. (Was 0.80, a leftover CLIP-cosine value that abstained on ~93%
+# of true matches.)
+ABSTAIN_THRESHOLD = 0.54
 
 CATALOG = "happywhale-via-obis"
 

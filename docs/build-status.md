@@ -14,6 +14,12 @@ Show it a whale photo and ask a question. It identifies the individual, reasons 
 uncertainty (disambiguates look-alikes, flags new animals), chains across sighting +
 shipping data to answer, and cites its sources + shows its reasoning.
 
+> **Scope boundary (2026-06-19):** this is a **conservation-risk reasoning agent, not a
+> general whale Q&A bot.** It covers identity · location · conditions · population · threats ·
+> protection · ship-risk — and gracefully says "not in my sources" outside that lane. The
+> headline answers are *chains across collections*, not single lookups. Full map + the
+> in-scope test: `design/scope-and-coverage.md`.
+
 ---
 
 ## Features (what the user sees) → build status
@@ -21,7 +27,7 @@ shipping data to answer, and cites its sources + shows its reasoning.
 | # | Feature (user-facing) | Status | Blocked on |
 |---|---|---|---|
 | **F1** | **"Who is this whale?"** — photo → ranked individual(s) + confidence + catalog match | ✅ **working** | — |
-| **F2** | **"Is it a *new* whale?"** — abstains / says NOVEL instead of guessing | ⚠️ built but **miscalibrated** | abstain threshold (see B0) |
+| **F2** | **"Is it a *new* whale?"** — abstains / says NOVEL instead of guessing | ✅ **calibrated** (soft signal) | threshold set on val (B0); overlap is high → agent must treat as a prior, not a verdict |
 | **F3** | **"Which one really?"** — disambiguates look-alikes by cross-referencing location/date | ⬜ | needs the agent (B5) + sighting_lookup (B2) |
 | **F4** | **"What's known about it?"** — grounded, cited answer from documents | ⬜ | needs text corpus (B3) + hybrid_search (B4) |
 | **F5** | **"Is it at risk from ships?"** — range → shipping-traffic overlap (the flagship multi-hop) | 🔄 **chain proven** | tools + scripted chain DONE (B2a+B2b); needs the agent (B5) to make it *agentic* not scripted |
@@ -48,11 +54,11 @@ it just needs two tools + a chain. F3/F4/F6 need the agent brain and/or the text
 ### Phase B — The agent spine (where "agentic" is earned) — mostly ⬜
 | ID | Item | Status | Notes |
 |---|---|---|---|
-| B0 | **Calibrate `abstain` threshold** | ⚠️ **open** | still 0.80 (CLIP scale); v3 scores ~0.5 → over-fires NOVEL. Recalibrate on **val only**. Unblocks F2; prereq for F3/recovery |
+| B0 | **Calibrate `abstain` threshold** | ✅ **done** (2026-06-19) | `0.80`→**`0.54`** via Youden's J on reid_split **val** (`evals/photo_id/calibrate_abstain.py`). Genuine/impostor top-1 distributions overlap heavily → balanced acc ~0.70 (false-abstain ~43%, false-match ~16%). NOVEL is a **soft prior**, not a verdict — B5 agent corroborates with `margin` + sighting/location. Unblocks F2 |
 | B1 | Tool contracts (`ToolResult`/`Filters`/`Citation`) | ✅ | `src/tools/contracts.py` already built |
 | B2a | **`vessel_traffic` tool** | ✅ **built** (2026-06-18) | `src/tools/vessel_traffic.py`; AIS raster → transit metrics + `lane_overlap`. Verified: SB Channel 28.2 vs quiet 1.2 mean/cell (23×). Query now committed |
 | B2b | **`sighting_lookup` tool** | ✅ **built** (2026-06-18) | `src/tools/sighting_lookup.py`; sightings → records + **core `range_bbox`** (percentile-trimmed so migratory outliers don't make a continent-box). **F5 chain proven end-to-end** on whale 479: Monterey core range → 2.4M transits/yr inside Monterey Bay NMS |
-| B3-PRE | **RAG preprocessing** (chunk + annotate) | 🔄 **design done** | section-aware chunks + **join-key metadata** (species ↔ photo_id, sanctuary ↔ vessel_traffic) + contextual headers; the annotation is the lever (bare chunks mix stocks). Design: `research/rag-preprocessing-design.md`. Impl pending |
+| B3-PRE | **RAG preprocessing** (chunk + annotate) | 🔄 **design done** | section-aware chunks + **join-key metadata** (species ↔ photo_id, sanctuary ↔ vessel_traffic) + contextual headers; the annotation is the lever (bare chunks mix stocks). Design: `design/rag-preprocessing-design.md` (+ per-collection designs in `design/`). Impl pending |
 | B3 | `doc_chunks` ingestion (embed + load) | ⬜ | 21 PDFs **acquired** (SAR/sanctuary/reviews in `~/Source/DATA/oceans/corpus/`); run B3-PRE → text-embed → load. Checkpoint: a scoped "humpback mortality" query returns humpback-only chunks |
 | B3-OBIS | OBIS-density tool (structured) | 🟡 own-data | separate track from the corpus; the disambiguation prior |
 | B-ENV | **`sighting_context` tool** (oceano enrichment) | ✅ **built** (2026-06-18) | `src/tools/sighting_context.py`; depth / SST / sanctuary / region per individual from the OBIS `oceano` JSON (already in `obis_seamap_points`, 100% coverage, joins via `source_row_id`). **Un-parks bathymetry + SST — no GEBCO/ERDDAP needed.** Depth/shelf-fraction = the F5 risk-modulation lever |
@@ -91,7 +97,7 @@ The rule that sorts these: **text-RAG only where the answer is genuinely *narrat
 (why it matters, what's being done, status-in-prose); structured for every *fact*
 (where, when, how deep, how busy).** Each source is on the list because it **drives a
 decision** in an agentic trace — not because it's available. Acquisition spec +
-exact documents → `research/rag-corpus-shopping-list.md`.
+exact documents → `design/rag-corpus-shopping-list.md`.
 
 **Priority 1 — text-RAG corpus (`doc_chunks`), ranked.** Honest scope: stock/region/
 threat-level, not per-individual. A curated ~dozens-of-docs corpus, not a scrape.
@@ -125,7 +131,7 @@ threat-level, not per-individual. A curated ~dozens-of-docs corpus, not a scrape
 
 ## What's next (the recommended path)
 
-1. **B0** — calibrate the abstain threshold (~half day; unblocks F2, prereq for F3).
+1. ~~**B0** — calibrate the abstain threshold~~ ✅ **done 2026-06-19** (τ=0.54 on val; F2 unblocked).
 2. **B2 + F5** — build `sighting_lookup` + `vessel_traffic`, prove the ship-strike
    multi-hop as a **scripted chain over real data** (no AI yet). The honest flagship.
 3. **B5** — wrap it in the LangGraph agent so it branches on close candidates
