@@ -5,10 +5,12 @@
 > must answer (its definition of done). **You acquire the source files**; once they're on
 > disk, the build job chunks + text-embeds them into `datasets.doc_chunks`.
 >
-> **Scope:** humpback whale, **Eastern North Pacific / California Current** (matches your
-> AIS + sanctuary data: Channel Islands & Chumash Heritage NMS, SB Channel). Theme:
-> **ship-strike risk** — so F4 is the "why it matters / what's being done" voice over the
-> F5 flagship.
+> **Scope:** the **6 Eastern North Pacific species actually in the DB** — Humpback (108k),
+> Killer Whale (2.6k), Gray (2.3k), Blue (404), Fin (110), Sperm (65) — in their correct
+> ENP / CA-OR-WA stock. (Originally scoped humpback-only; the DB species breakdown upgraded
+> it to multi-species, so the agent can answer about any sighting it IDs.) Matches your AIS +
+> sanctuary data (Channel Islands & Chumash Heritage NMS, SB Channel). Theme: **ship-strike
+> risk** — F4 is the "why it matters / what's being done" voice over the F5 flagship.
 >
 > **Honest scope reminder:** these are **stock / region / threat-level**, never per-animal.
 > The corpus answers "what's known about this whale's *population and the threats it faces*."
@@ -30,27 +32,29 @@ Text-RAG answers the **narrative** ("why / what's being done / status-in-prose")
 
 ## Priority 1 — the text corpus (4 sources)
 
-### 1. NOAA Stock Assessment Reports (SARs) — *the backbone*
-- **Get:** *"Humpback Whale (Megaptera novaeangliae): California/Oregon/Washington Stock"* —
-  the current Pacific marine-mammal SAR (annual). If in scope, also the **species/DPS status
-  review** (2016 ESA rule split humpbacks into DPSs: Central America = endangered, Mexico =
-  threatened, Hawaii = not listed — the CA/OR/WA *stock* mixes them; that tension is itself a
-  great severity/conflict payload).
-- **Where:** NOAA Fisheries → *Marine Mammal Stock Assessment Reports* → Pacific region
-  (`fisheries.noaa.gov/national/marine-mammal-protection/marine-mammal-stock-assessment-reports`).
-- **Format:** PDF · **Effort:** low (a few bounded, authoritative files) · **License:** public domain.
+### 1. NOAA Stock Assessment Reports (SARs) — *the backbone* ✅ ACQUIRED
+- **Status:** DONE. 9 curated PDFs (the 6 DB species in their ENP/CA-OR-WA stock + the
+  combined 2024 Pacific SAR) are in **`~/Source/DATA/oceans/corpus/sar/`** with a manifest
+  README. Curated from a larger `~/Downloads/SAR` collection; species not in the DB and
+  wrong-region stocks were excluded.
+- **Agentic payload confirmed by reading them:** each SAR carries the **vessel-strike vs
+  entanglement mortality split**, so the F5 severity branch **pivots per species** (humpback =
+  entanglement-dominant, vessel strike minor; blue/fin = vessel strike is a top threat).
+- **Format:** PDF · **License:** public domain (NOAA).
 - **Drives:** the **severity branch** — stock status decides whether the agent escalates
   (small/declining, strike = top threat) or pivots (recovering, threat is entanglement).
 - **Answers:** `[RAG]` population status/trend · abundance estimate · PBR · annual human-caused
   mortality (ship strike vs entanglement) · strategic-stock status.
 
-### 2. Sanctuary Condition Reports + Management Plans — *the mitigation branch*
-- **Get:** **Channel Islands NMS** Condition Report **and** Management Plan. Add **Greater
-  Farallones / Cordell Bank NMS** if SF Bay Area is in scope; **Chumash Heritage NMS**
-  designation / draft management documents (designated 2024).
-- **Where:** `sanctuaries.noaa.gov` → each sanctuary → *Condition Report* and *Management Plan*
-  (Channel Islands: `channelislands.noaa.gov`).
-- **Format:** PDF (large; few) · **Effort:** medium · **License:** public domain.
+### 2. Sanctuary Condition Reports + Management Plans — *the mitigation branch* ✅ ACQUIRED
+- **Status:** DONE. 10 curated PDFs in **`~/Source/DATA/oceans/corpus/sanctuary/`** (manifest
+  README) — the 4 California sanctuaries (Channel Islands = primary/SB Channel, Greater
+  Farallones, Cordell Bank, Monterey Bay) + Olympic Coast (WA), each with its current
+  Condition Report + Management Plan. Other coasts, historical EIS volumes, and superseded
+  editions excluded. Channel Islands CR verified to carry heavy ship-strike/vessel content.
+- **Ingestion note:** Condition Reports are large (20–37 MB, figure-heavy) — extract **text
+  only**, don't embed the images.
+- **Format:** PDF · **License:** public domain (NOAA).
 - **Drives:** the **recovery/mitigation branch** — once F5 finds traffic overlap, the plan
   says whether a measure exists (VSR / voluntary 10-kt zone). The conclusion flips on this text.
 - **Answers:** `[RAG]` pressures on the sanctuary (vessel traffic, ship strike) · management
@@ -66,16 +70,12 @@ Text-RAG answers the **narrative** ("why / what's being done / status-in-prose")
   "are vessels actually complying?" and pulls the report card. Retrieval N+1 built from N.
 - **Answers:** `[RAG]` how strike risk is scored · vessel-cooperation rates with the slowdown.
 
-### 4. Ship-strike / entanglement reviews — *mechanism depth (bounded!)*
-- **Get (2–3, prefer open-access):**
-  - **Rockwood, Calambokidis & Jahncke 2017, PLOS ONE** — vessel-collision mortality of blue/
-    humpback/fin whales on the **U.S. West Coast** (open access; directly on-region — the key one).
-  - **Conn & Silber 2013, Ecosphere** — vessel speed vs strike risk (open access).
-  - *(optional)* **Laist et al. 2001** — "Collisions between ships and whales" (foundational
-    review) or **Vanderlaan & Taggart 2007** — the speed→lethality curve.
-- **Where:** PLOS ONE / Ecosphere (open) · Google Scholar for the others.
-- **Format:** PDF · **Effort:** medium — **the only unbounded source; cap it at 2–3** ·
-  **License:** open-access only (avoid paywalled copies).
+### 4. Ship-strike / entanglement reviews — *mechanism depth (bounded!)* ✅ ACQUIRED
+- **Status:** DONE. 2 open-access papers in **`~/Source/DATA/oceans/corpus/reviews/`**
+  (manifest README): **Rockwood et al. 2017** (West Coast blue/humpback/fin mortality — on
+  region + 3 DB species) and **Conn & Silber 2013** (speed→lethality mechanism). **Capped at
+  2 — do not add more** (this is the weakest-agency garnish source).
+- **Format:** PDF · **License:** open-access.
 - **Drives:** **enrichment** (honest: weakest agency) — the "why humpbacks are vulnerable /
   how speed affects lethality" depth. The best justification for *real* semantic search (messy
   prose). Keep it small.
@@ -128,10 +128,10 @@ what a tool answers.)
 
 ## Acquisition checklist (what you actually do)
 
-- [ ] **SARs** — download the CA/OR/WA humpback SAR PDF(s). *(start here — backbone)*
-- [ ] **Sanctuary** — Channel Islands Condition Report + Management Plan PDFs (+ others if in scope).
+- [x] **SARs** — DONE: 9 curated PDFs (6 ENP species + combined 2024) in `~/Source/DATA/oceans/corpus/sar/` (see its README).
+- [x] **Sanctuary** — DONE: 10 curated PDFs (4 CA sanctuaries + Olympic Coast) in `~/Source/DATA/oceans/corpus/sanctuary/`.
 - [ ] **Whale Safe** — save the methodology page + the SB Channel / SF report cards.
-- [ ] **Reviews** — Rockwood 2017 + Conn & Silber 2013 (open-access PDFs); stop at 3.
+- [x] **Reviews** — DONE: Rockwood 2017 + Conn & Silber 2013 in `~/Source/DATA/oceans/corpus/reviews/`. Capped at 2.
 - [ ] **OBIS density** — decide: aggregate existing `sightings`, or pull OBIS API. *(separate tool track)*
 - [ ] *(parked)* GEBCO — skip unless a demo needs the visual.
 
