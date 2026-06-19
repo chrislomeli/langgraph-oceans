@@ -24,7 +24,7 @@ shipping data to answer, and cites its sources + shows its reasoning.
 | **F2** | **"Is it a *new* whale?"** — abstains / says NOVEL instead of guessing | ⚠️ built but **miscalibrated** | abstain threshold (see B0) |
 | **F3** | **"Which one really?"** — disambiguates look-alikes by cross-referencing location/date | ⬜ | needs the agent (B5) + sighting_lookup (B2) |
 | **F4** | **"What's known about it?"** — grounded, cited answer from documents | ⬜ | needs text corpus (B3) + hybrid_search (B4) |
-| **F5** | **"Is it at risk from ships?"** — range → shipping-traffic overlap (the flagship multi-hop) | 🟡 **data ready** | sighting_lookup (B2) + vessel_traffic (B2) + chain |
+| **F5** | **"Is it at risk from ships?"** — range → shipping-traffic overlap (the flagship multi-hop) | 🔄 **chain proven** | tools + scripted chain DONE (B2a+B2b); needs the agent (B5) to make it *agentic* not scripted |
 | **F6** | **"Show your work"** — answer + citations + decision trace | ⬜ | needs the agent + trace field (B5) |
 
 **Read this:** F1 is real and good. F5 is the next honest build — all its **data exists**,
@@ -51,9 +51,10 @@ it just needs two tools + a chain. F3/F4/F6 need the agent brain and/or the text
 | B0 | **Calibrate `abstain` threshold** | ⚠️ **open** | still 0.80 (CLIP scale); v3 scores ~0.5 → over-fires NOVEL. Recalibrate on **val only**. Unblocks F2; prereq for F3/recovery |
 | B1 | Tool contracts (`ToolResult`/`Filters`/`Citation`) | ✅ | `src/tools/contracts.py` already built |
 | B2a | **`vessel_traffic` tool** | ✅ **built** (2026-06-18) | `src/tools/vessel_traffic.py`; AIS raster → transit metrics + `lane_overlap`. Verified: SB Channel 28.2 vs quiet 1.2 mean/cell (23×). Query now committed |
-| B2b | **`sighting_lookup` tool** | 🟡 **data ready** | query `sightings` by individual → records + `range_bbox = ST_Extent`. Feeds B2a. The other half of the F5 chain |
+| B2b | **`sighting_lookup` tool** | ✅ **built** (2026-06-18) | `src/tools/sighting_lookup.py`; sightings → records + **core `range_bbox`** (percentile-trimmed so migratory outliers don't make a continent-box). **F5 chain proven end-to-end** on whale 479: Monterey core range → 2.4M transits/yr inside Monterey Bay NMS |
 | B3 | Text corpus ingestion → `doc_chunks` | ⬜ **acquisition spec'd** | 4 sources ranked below; shopping list in `research/rag-corpus-shopping-list.md`. **User acquires the PDFs**; then chunk + text-embed |
 | B3-OBIS | OBIS-density tool (structured) | 🟡 own-data | separate track from the corpus; the disambiguation prior |
+| B-ENV | **`sighting_context` tool** (oceano enrichment) | ✅ **built** (2026-06-18) | `src/tools/sighting_context.py`; depth / SST / sanctuary / region per individual from the OBIS `oceano` JSON (already in `obis_seamap_points`, 100% coverage, joins via `source_row_id`). **Un-parks bathymetry + SST — no GEBCO/ERDDAP needed.** Depth/shelf-fraction = the F5 risk-modulation lever |
 | B4 | `hybrid_search` / `catalog_search` tools | ⬜ | depends on B3 |
 | B5 | Agent graph (router → ReAct → recovery) | ⬜ | greenfield; LangGraph. The actual "agency". Trace must be a first-class field |
 | B5-CTX | **Context layer** (Layer 2.5: state · assembly · provenance · trace; later compression/budget/fusion) | ⬜ **extract from the vertical** | framework-grade, infra-flavored. MVP = state+assembly+provenance+trace, lifted out of the ship-strike agent once the scratchpad sprawl is real — **build after B5, not before**. Design: `research/context-layer-design.md` |
@@ -76,7 +77,9 @@ it just needs two tools + a chain. F3/F4/F6 need the agent brain and/or the text
 | `fluke_embeddings` (v3, 512-d) | F1 | ✅ full catalog |
 | `ais_2022…2025` (PostGIS raster, transit counts) | F5 | ✅ loaded + **queryable via `vessel_traffic`** |
 | NMS / VSR speed-zone polygons (`vsr_zones`) | F5 lane-overlap | ✅ loaded (7 NMS sanctuaries / 12 polygons) |
-| `doc_chunks` (text corpus) | F4 | ⬜ not created / not sourced |
+| `obis_seamap_points.oceano` (depth/SST/salinity/zone JSON) | env context (F5 modulation) | ✅ 100% coverage, via `sighting_context` |
+| `obis_seamap_points` remarks (occurrence/organism) | F4 per-encounter text | 🟡 43–54% coverage; modest per-sighting prose, **unused** — a real if small per-individual text source |
+| `doc_chunks` (text corpus) | F4 | ⬜ not created (PDFs acquired; ingestion pending) |
 | catalog image blobs | A3, F1 | ✅ on disk |
 
 ---
@@ -101,12 +104,17 @@ threat-level, not per-individual. A curated ~dozens-of-docs corpus, not a scrape
 
 **Priority 2 — structured context tools** (low learning value → must be cheap × high payoff):
 
+> **2026-06-18 finding:** the OBIS `oceano` JSON (in `obis_seamap_points`, 100% coverage)
+> already carries **depth, SST, salinity, marine ecoregion, and sanctuary per sighting** —
+> the enrichment we'd planned to go acquire was in the source all along. Surfaced via the
+> `sighting_context` tool (B-ENV). This un-parks/un-defers most of the table below.
+
 | Source | Agentic role | Cost | Verdict |
 |---|---|---|---|
 | **OBIS density** (own data / OBIS API) | disambiguation **prior** + recovery plausibility | ~free (aggregate) | ✅ **in** — agency. ⚠️ verify it discriminates across candidates before relying on it |
-| **GEBCO bathymetry** | risk-modulation + habitat-depth disambiguation | low (static raster, reuses `vessel_traffic` pattern) | 🅿️ **PARKED stand-in** — the cheapest demo-wow visual; build only if a demo needs polish |
-| SST / chlorophyll (ERDDAP/CMEMS) | "why was it here" (upwelling) | **high** (date-matched API) | ❌ deferred |
-| WDPA / Protected Planet | inside a reserve? | low | ❌ skip — redundant with `vsr_zones` |
+| **Bathymetry (depth)** | risk-modulation + habitat-depth disambiguation | **~free** — already in `oceano` | ✅ **DONE via `sighting_context`** — no GEBCO download needed |
+| **SST** | "why was it here" (cool upwelling water) | **~free** — already in `oceano` | ✅ **available via `sighting_context`** — no ERDDAP API needed (chlorophyll not in oceano; SST is) |
+| Sanctuary/region (WDPA, LME) | which sanctuary / ecoregion a sighting sits in | ~free — already in `oceano` | ✅ in `sighting_context`; complements the `vsr_zones` geometry |
 
 > Two build tracks, kept distinct: the four text sources = one job (chunk → text-embed →
 > `doc_chunks` → `hybrid_search`). **OBIS density is a separate structured tool** (like

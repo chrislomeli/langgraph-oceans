@@ -104,7 +104,8 @@ class VesselTrafficTool:
         if not row or row.get("total_transits") is None:
             return self._empty(region, year, "Region outside AIS coverage")
 
-        zones = [r["name"] for r in self.gw.fetch_rows(_ZONE_SQL, coords)]
+        # set() dedups: a sanctuary stored as a multipolygon returns one row per part.
+        zones = sorted({r["name"] for r in self.gw.fetch_rows(_ZONE_SQL, coords)})
         total = int(row["total_transits"])
         cells = int(row["trafficked_cells"])
         busiest = int(row["busiest_cell"])
