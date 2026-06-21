@@ -39,11 +39,6 @@ from config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Must match raw/schema.sql vector(N). 384 = sentence-transformers/all-MiniLM-L6-v2
-# (the fastembed default used by Embedder). Change both if you swap models.
-EMBEDDING_DIM = 384
-
-
 class PgGateway:
     """Postgres + pgvector access layer backed by a connection pool.
 
@@ -102,6 +97,20 @@ class PgGateway:
                 "fetch_rows failed: %s | %s",
                 e,
                 self._format_sql_for_log(sql, params),
+            )
+            raise
+
+    def execute_many(self, sql: str, data: list[list[Any]] ) -> int:
+        """Run a mutating statement; return rowcount."""
+        try:
+            with self.conn() as conn, conn.cursor() as cur:
+                cur.executemany(sql, data)
+                return cur.rowcount
+        except Exception as e:
+            logger.exception(
+                "execute failed: %s | %s",
+                e,
+                self._format_sql_for_log(sql, (None, None)),
             )
             raise
 

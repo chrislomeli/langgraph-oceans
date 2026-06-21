@@ -307,3 +307,34 @@ SELECT 2025 AS year,
        ais_2025.rast
 FROM ais_2025;
 
+create table if not exists doc_chunks
+(
+    chunk_id     text not null
+        primary key,
+    text         text not null,
+    header       text,
+    species      text[],
+    sanctuary    text,
+    doc_type     text not null,
+    section      text,
+    stock        text,
+    source       text not null,
+    year         integer,
+    embedding    vector(1536),
+    tsv          tsvector generated always as (to_tsvector('english'::regconfig,
+                                                           ((COALESCE(header, ''::text) || ' '::text) ||
+                                                            COALESCE(text, ''::text)))) stored,
+    embedder_ver text not null
+);
+
+create index if not exists doc_chunks_embedding_hnsw
+    on doc_chunks using hnsw (embedding public.vector_cosine_ops);
+
+create index if not exists doc_chunks_tsv_gin
+    on doc_chunks using gin (tsv);
+
+create index if not exists doc_chunks_species_gin
+    on doc_chunks using gin (species);
+
+create index if not exists doc_chunks_filter_btree
+    on doc_chunks (doc_type, sanctuary, embedder_ver);

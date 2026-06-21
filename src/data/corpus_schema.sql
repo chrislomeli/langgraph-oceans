@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS datasets.stock_status (
 --    2000-dim index cap). species[] holds COMMON NAMES (matches individuals.common_name).
 -- ──────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS datasets.doc_chunks (
-    chunk_id      bigserial PRIMARY KEY,
+    chunk_id      text PRIMARY KEY,              -- deterministic, supplied on insert: e.g. 'humpback-caorwa-2021.12' (upsert key)
     text          text NOT NULL,                 -- the chunk body (what gets cited)
     header        text,                          -- contextual header prepended before embedding
     -- metadata / join keys ────────────────────

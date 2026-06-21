@@ -2,7 +2,7 @@
 
 > **Purpose:** the single place to see *every feature we're building and where it
 > stands.* The other docs are deep-dives; this is the map. When they disagree with
-> reality, fix this file first. Last verified: **2026-06-18**.
+> reality, fix this file first. Last verified: **2026-06-20**.
 >
 > Legend: ✅ done · 🔄 in progress · 🟡 data/deps ready, not built · ⬜ not started · ⚠️ loose end
 
@@ -58,11 +58,13 @@ it just needs two tools + a chain. F3/F4/F6 need the agent brain and/or the text
 | B1 | Tool contracts (`ToolResult`/`Filters`/`Citation`) | ✅ | `src/tools/contracts.py` already built |
 | B2a | **`vessel_traffic` tool** | ✅ **built** (2026-06-18) | `src/tools/vessel_traffic.py`; AIS raster → transit metrics + `lane_overlap`. Verified: SB Channel 28.2 vs quiet 1.2 mean/cell (23×). Query now committed |
 | B2b | **`sighting_lookup` tool** | ✅ **built** (2026-06-18) | `src/tools/sighting_lookup.py`; sightings → records + **core `range_bbox`** (percentile-trimmed so migratory outliers don't make a continent-box). **F5 chain proven end-to-end** on whale 479: Monterey core range → 2.4M transits/yr inside Monterey Bay NMS |
-| B3-PRE | **RAG preprocessing** (chunk + annotate) | 🔄 **design done** | section-aware chunks + **join-key metadata** (species ↔ photo_id, sanctuary ↔ vessel_traffic) + contextual headers; the annotation is the lever (bare chunks mix stocks). Design: `design/rag-preprocessing-design.md` (+ per-collection designs in `design/`). Impl pending |
-| B3 | `doc_chunks` ingestion (embed + load) | ⬜ | 21 PDFs **acquired** (SAR/sanctuary/reviews in `~/Source/DATA/oceans/corpus/`); run B3-PRE → text-embed → load. Checkpoint: a scoped "humpback mortality" query returns humpback-only chunks |
+| B3-PRE | **RAG preprocessing** (chunk + annotate) | ✅ **built** (2026-06-20) | `src/rag/extract_sar.py`: heading-split (case-insensitive + TOC strip, generalized across all 8 SARs) → section-aware chunks + **join-key metadata** (species[] ↔ photo_id, sanctuary ↔ vessel_traffic) + contextual header embedded (not stored in `text`). Design: `design/rag-preprocessing-design.md`. **SAR collection only**; sanctuary/review collections still to chunk |
+| B3 | `doc_chunks` ingestion (embed + load) | ✅ **SAR done** (2026-06-20) | **378 SAR chunks loaded**, openai-3-large@1536, idempotent upsert on deterministic `chunk_id` (`ON CONFLICT`). Checkpoint **passed**: scoped "humpback mortality" returns humpback-only Mortality chunks (`src/rag/retrieval_smoke.py`); without the species filter a gray-whale chunk leaks — proving the scoping is load-bearing. Remaining 13 PDFs (sanctuary/reviews) not yet ingested |
+| B3-SANCT | **Sanctuary collection** chunk + load (condition + mgmt) | 🟡 **acquired, not built** | 10 PDFs in `corpus/sanctuary/` (5 condition + 5 mgmt). Reuses the shared embedder/repo; needs a collection extractor — problem is **selection** (CR ~90% out-of-lane; mgmt heterogeneous 4pp–479pp, per-doc page ranges) + `sanctuary` join-key populated. Designs: `design/sanctuary-condition-collection-design.md`, `design/sanctuary-mgmt-collection-design.md` |
+| B3-REV | **Reviews collection** chunk + load (ship-strike / entanglement) | 🟡 **acquired, not built** | 2 PDFs in `corpus/reviews/` (conn-silber-2013, rockwood-2017). Reuses shared backend; **multi-species `species[]`**, join axis = the *mechanism question* not species; keep Abstract+Discussion, drop Methods/Refs. Design: `design/reviews-collection-design.md` |
 | B3-OBIS | OBIS-density tool (structured) | 🟡 own-data | separate track from the corpus; the disambiguation prior |
 | B-ENV | **`sighting_context` tool** (oceano enrichment) | ✅ **built** (2026-06-18) | `src/tools/sighting_context.py`; depth / SST / sanctuary / region per individual from the OBIS `oceano` JSON (already in `obis_seamap_points`, 100% coverage, joins via `source_row_id`). **Un-parks bathymetry + SST — no GEBCO/ERDDAP needed.** Depth/shelf-fraction = the F5 risk-modulation lever |
-| B4 | `hybrid_search` / `catalog_search` tools | ⬜ | depends on B3 |
+| B4 | `hybrid_search` / `catalog_search` tools | 🔄 **repo layer built** | `DocumentRepository.search` (vector + metadata pre-filter) + `search_hybrid` (RRF fuse vector+`tsv`) built & A/B-verified (`retrieval_smoke.py`); `doc_search` Layer-3 tool wrapping them only SKETCHED (full-text-vs-snippet + query-shaping for tsv AND-semantics still to decide) |
 | B5 | Agent graph (router → ReAct → recovery) | ⬜ | greenfield; LangGraph. The actual "agency". Trace must be a first-class field |
 | B5-CTX | **Context layer** (Layer 2.5: state · assembly · provenance · trace; later compression/budget/fusion) | ⬜ **extract from the vertical** | framework-grade, infra-flavored. MVP = state+assembly+provenance+trace, lifted out of the ship-strike agent once the scratchpad sprawl is real — **build after B5, not before**. Design: `research/context-layer-design.md` |
 | B6 | Grounded synthesis (LLM + citations) | ⬜ | the synth node |
@@ -104,10 +106,10 @@ threat-level, not per-individual. A curated ~dozens-of-docs corpus, not a scrape
 
 | # | Source | Agentic role (what the result *triggers*) | Scenario | Status |
 |---|---|---|---|---|
-| 1 | **NOAA Stock Assessment Reports (SARs)** | reads stock status → **escalate or pivot** the investigation | Severity / conflict | ⬜ to acquire |
-| 2 | **Sanctuary Condition Reports + Mgmt Plans** | "is the risk *managed*?" → conclusion flips on the text; triggers Whale Safe hop | Recovery / mitigation | ⬜ to acquire |
-| 3 | **Whale Safe methodology + report cards** | "zone exists — are vessels *complying*?" → dependent follow-up | Multi-hop dependency | ⬜ to acquire |
-| 4 | **Ship-strike / entanglement reviews** | *mechanism* depth (why humpbacks are vulnerable) | Enrichment | ⬜ **bound to 2–3 open-access** |
+| 1 | **NOAA Stock Assessment Reports (SARs)** | reads stock status → **escalate or pivot** the investigation | Severity / conflict | ✅ **ingested** (9 in `corpus/sar/`; 8 chunked → 378 `doc_chunks`, B3) |
+| 2 | **Sanctuary Condition Reports + Mgmt Plans** | "is the risk *managed*?" → conclusion flips on the text; triggers Whale Safe hop | Recovery / mitigation | 🟡 **acquired, ingestion pending** (10 in `corpus/sanctuary/`: 5 condition + 5 mgmt) |
+| 3 | **Whale Safe methodology + report cards** | "zone exists — are vessels *complying*?" → dependent follow-up | Multi-hop dependency | ⬜ to acquire (no `corpus/whalesafe/` yet) |
+| 4 | **Ship-strike / entanglement reviews** | *mechanism* depth (why humpbacks are vulnerable) | Enrichment | 🟡 **acquired, ingestion pending** (2 in `corpus/reviews/`: conn-silber-2013, rockwood-2017) |
 
 **Priority 2 — structured context tools** (low learning value → must be cheap × high payoff):
 

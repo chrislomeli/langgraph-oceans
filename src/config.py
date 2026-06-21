@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     # embedder_ver: str = "clip-vitb32-v1"          # raw open_clip baseline (floor)
     # embedder_ver: str = "clip-hf-vitb32-v1"       # HF CLIP base (LoRA's fair baseline)
     # embedder_ver: str = "clip-hf-vitb32-lora-v2"  # CLIP + LoRA + SupCon (reid@1 0.27)
-    embedder_ver: str = "effnetv2s-arcface-v3"
+    # embedder_ver: str = "effnetv2s-arcface-v3"
 
     # ── LLM credentials ───────────────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None
@@ -149,4 +149,6 @@ def get_settings() -> Settings:
     Otherwise a plain ``Settings()`` is returned (env vars only).
     """
     env_file = os.getenv("AI_ENV_FILE")
-    return Settings(_env_file=env_file) if env_file else Settings()
+    settings =  Settings(_env_file=env_file ) if env_file else Settings()
+
+    return settings
