@@ -52,6 +52,22 @@ it just needs two tools + a chain. F3/F4/F6 need the agent brain and/or the text
 | A7 | Layer-A eval (retrieval: reid@k / MRR) | ✅ | `reid_split` val/test, `evals/photo_id/eval.py` |
 
 ### Phase B — The agent spine (where "agentic" is earned) — mostly ⬜
+
+**Layer-3 tool roster — the delivery list. Definition of done = (a) tool built? + (b) data loaded?**
+This is the canonical "every tool we will deliver" list; the lettered build-items below carry the detail.
+
+| Tool | What it lets the agent DO | (a) Built? | (b) Data loaded? |
+|---|---|---|---|
+| `photo_id` | photo → ranked individual(s) + confidence + abstain/NOVEL | ✅ yes | ✅ yes — `fluke_embeddings` (114k v3), `individuals`, `sightings` |
+| `sighting_lookup` | individual → sighting history + core `range_bbox` (feeds vessel_traffic) | ✅ yes | ✅ yes — `sightings`, `individuals` |
+| `sighting_context` | individual → depth / SST / sanctuary / region per sighting | ✅ yes | ✅ yes — `obis_seamap_points.oceano` (100%) |
+| `vessel_traffic` | `range_bbox` → transit metrics + lane_overlap + sanctuary names | ✅ yes | ✅ yes — `ais_2022–2025` rasters, `vsr_zones` |
+| `stock_facts` | species → keyed card (abundance, PBR, strike/entangle deaths, status) | ⬜ no | ⬜ no — `stock_status` table exists but **0 rows** (curate ~6 from SARs) |
+| `doc_search` | query + species/sanctuary/doc_type filter → top-k narrative chunks (hybrid) | 🔄 partial — repo `search`/`search_hybrid` built+verified; Layer-3 wrapper only sketched | 🔄 partial — `doc_chunks` SAR (378) loaded; sanctuary (10) + reviews (2) acquired-not-ingested |
+| `obis_density` *(optional)* | disambiguation prior — candidate plausibility by recorded density | ⬜ no | 🟡 derivable from `sightings` (own data) — speculative, separate track |
+
+**Read:** 4 of 7 are fully done (built **and** data) — and those 4 are exactly the F5-chain set = the **B5 start gate**. `stock_facts` needs both halves; `doc_search` needs its tool wrapper + the rest of the corpus; `obis_density` is optional. No other tools are planned — this is the whole repertoire.
+
 | ID | Item | Status | Notes |
 |---|---|---|---|
 | B0 | **Calibrate `abstain` threshold** | ✅ **done** (2026-06-19) | `0.80`→**`0.54`** via Youden's J on reid_split **val** (`evals/photo_id/calibrate_abstain.py`). Genuine/impostor top-1 distributions overlap heavily → balanced acc ~0.70 (false-abstain ~43%, false-match ~16%). NOVEL is a **soft prior**, not a verdict — B5 agent corroborates with `margin` + sighting/location. Unblocks F2 |
@@ -64,12 +80,16 @@ it just needs two tools + a chain. F3/F4/F6 need the agent brain and/or the text
 | B3-REV | **Reviews collection** chunk + load (ship-strike / entanglement) | 🟡 **acquired, not built** | 2 PDFs in `corpus/reviews/` (conn-silber-2013, rockwood-2017). Reuses shared backend; **multi-species `species[]`**, join axis = the *mechanism question* not species; keep Abstract+Discussion, drop Methods/Refs. Design: `design/reviews-collection-design.md` |
 | B3-OBIS | OBIS-density tool (structured) | 🟡 own-data | separate track from the corpus; the disambiguation prior |
 | B-ENV | **`sighting_context` tool** (oceano enrichment) | ✅ **built** (2026-06-18) | `src/tools/sighting_context.py`; depth / SST / sanctuary / region per individual from the OBIS `oceano` JSON (already in `obis_seamap_points`, 100% coverage, joins via `source_row_id`). **Un-parks bathymetry + SST — no GEBCO/ERDDAP needed.** Depth/shelf-fraction = the F5 risk-modulation lever |
+| B-FACTS | **`stock_facts` tool** + `stock_status` curation | ⬜ **untracked until now** | F4's *facts* leg: trivial keyed lookup `WHERE species=?`. `datasets.stock_status` table **exists but 0 rows** — hand-curate ~6 from the SARs (`design/sar-collection-design.md` field list). NOT a B5 gate; the agent acquires it incrementally |
 | B4 | `hybrid_search` / `catalog_search` tools | 🔄 **repo layer built** | `DocumentRepository.search` (vector + metadata pre-filter) + `search_hybrid` (RRF fuse vector+`tsv`) built & A/B-verified (`retrieval_smoke.py`); `doc_search` Layer-3 tool wrapping them only SKETCHED (full-text-vs-snippet + query-shaping for tsv AND-semantics still to decide) |
-| B5 | Agent graph (router → ReAct → recovery) | ⬜ | greenfield; LangGraph. The actual "agency". Trace must be a first-class field |
+| **B-BIND** | **LLM tool-binding layer** (the B5 gate) | 🔄 **scaffolded 2026-06-20; ads = `TODO(you)`** | **`src/agent/tools.py`** — 4 tools wrapped as LangChain `@tool`, registered & smoke-verified (`uv run python -m agent.tools`). Plumbing done (lazy singletons, F5-chain seam). **YOUR step (tier 2): write each docstring = the tool *ad*** (Trigger / Anti-overlap / Returns, per `design/agent-orchestration-design.md`). The single most important prerequisite to B5 |
+| **B-CLI** | **Agent entrypoint / CLI driver** | ✅ **built 2026-06-20** | **`src/agent/cli.py`** — `uv run python -m agent.cli "<q>" [--image PATH] [--trace]`; invokes the graph, renders answer + optional tool-call trace. Single-shot (multi-turn chat deferred *with* B5-CTX — same checkpointer) |
+| ▶ **GATE** | **Minimum to START B5** | — | **B-BIND + B-CLI + pick agent LLM (Opus 4.8)**. That's it. The 4 structured tools are built; the F5 chain needs **zero corpus**. doc_search/stock_facts/collections/evals are *parallel-or-after*, NOT prerequisites |
+| B5 | Agent graph (router → ReAct → recovery) | 🔄 **scaffolded 2026-06-20; system prompt = `TODO(you)`** | **`src/agent/graph.py`** — ReAct loop (agent ↔ ToolNode ↔ `tools_condition`) over the 4 bound tools, compiles & smoke-verified; key configured so it RUNS. **YOUR step (tier 2): write `SYSTEM_PROMPT`** (scope · hub-and-zoom decompose · abstain · cite). Router/recovery = deferred extension nodes. Design: `design/agent-graph-design.md`. Model `claude-opus-4-8` (swap to flag). Checkpoint = run F5 via the CLI |
 | B5-CTX | **Context layer** (Layer 2.5: state · assembly · provenance · trace; later compression/budget/fusion) | ⬜ **extract from the vertical** | framework-grade, infra-flavored. MVP = state+assembly+provenance+trace, lifted out of the ship-strike agent once the scratchpad sprawl is real — **build after B5, not before**. Design: `research/context-layer-design.md` |
 | B6 | Grounded synthesis (LLM + citations) | ⬜ | the synth node |
-| B7 | Layer-B eval (answer faithfulness) | ⬜ | reuses framework judge |
-| B8 | Layer-C eval (orchestration / trajectory) | ⬜ | the "agentic = a number" payoff; local-first (LangSmith quota burned) |
+| B7 | Layer-B eval (answer faithfulness) | ⬜ | reuses framework judge. **Hidden work: authoring the Q + grounded-answer cases** (the harness is reused; the dataset is not) |
+| B8 | Layer-C eval (orchestration / trajectory) | ⬜ | the "agentic = a number" payoff; local-first (LangSmith quota burned). **Hidden work: authoring scenario cases** (question → expected trajectory) — historically under-estimated |
 
 ### Phase C — ML lift (the personal learning goal) — ✅ folded into A6
 | ID | Item | Status | Notes |
