@@ -11,7 +11,7 @@ Build one registry at the composition root and pass it to the graph
 builders that need it. The registry knows nothing about the rest of
 the project — agents register their own Pydantic models against it,
 which keeps prompts/ from importing agents/ (the dependency arrow
-must always go agent → prompt, never the reverse).
+must always go agents → prompt, never the reverse).
 
 Templates layout
 ────────────────

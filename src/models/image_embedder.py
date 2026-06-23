@@ -12,13 +12,29 @@ We are NOT training the model — this is pure inference (image → 512 numbers)
 
 import logging
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
+from urllib.request import urlopen
 
 import open_clip
 import torch
 from PIL import Image
 
 log = logging.getLogger(__name__)
+
+
+def _open_rgb(src) -> Image.Image:
+    """Open an image as RGB from a local path OR an http(s) URL.
+
+    The catalog build passes local paths; a photo_id live query may pass a public URL
+    (e.g. a Happywhale thumb_url), so the query path transparently fetches it. Keeping
+    this in the embedder (not a separate agent tool) means fetching is below-the-agent
+    plumbing, not a reasoning hop.
+    """
+    if isinstance(src, str) and src.startswith(("http://", "https://")):
+        with urlopen(src, timeout=15) as resp:  # noqa: S310 — trusted image URLs
+            return Image.open(BytesIO(resp.read())).convert("RGB")
+    return Image.open(src).convert("RGB")
 
 
 # --- the embedder registry: version tag → how to build that model ---------------
@@ -225,7 +241,7 @@ class ImageEmbedder:
         tensors, kept = [], []
         for p in paths:
             try:
-                img = Image.open(p).convert("RGB")
+                img = _open_rgb(p)
                 tensors.append(self.preprocess(img))  # model's own transform → tensor
                 kept.append(p)
             except Exception as e:
@@ -235,6 +251,6 @@ class ImageEmbedder:
         return list(zip(kept, self._encode(tensors)))
 
     def embed_one(self, path) -> list[float]:
-        """Embed a single image → one unit vector of length DIM (raises if unreadable)."""
-        img = Image.open(path).convert("RGB")
+        """Embed a single image (local path or http(s) URL) → one unit vector (raises if unreadable)."""
+        img = _open_rgb(path)
         return self._encode([self.preprocess(img)])[0]

@@ -61,6 +61,8 @@ dependencies = [
     "timm>=1.0.27",
     "pdfplumber>=0.11.10",
     "langchain-text-splitters>=1.1.2",
+    "agent-chat",
+    "uvicorn[standard]>=0.30",
 ]
 
 
@@ -112,5 +114,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
 pythonpath = ["src"]
+markers = [
+    "live: integration test that hits live Postgres + on-disk catalog (no LLM/no token cost). Run: pytest -m live",
+]
+
+[tool.uv.sources]
+agent-chat = { path = "../agent_chat", editable = true }
 
 

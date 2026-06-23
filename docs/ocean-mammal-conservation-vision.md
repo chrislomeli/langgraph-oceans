@@ -359,7 +359,7 @@ class Citation(BaseModel):
 class ToolResult(BaseModel):           # base every tool return extends
     tool: str
     ok: bool                           # False on empty/failure — NEVER raise into the loop
-    summary: str                       # one line the agent + trace can read
+    summary: str                       # one line the agents + trace can read
     citations: list[Citation] = []
 ```
 

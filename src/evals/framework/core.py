@@ -1,4 +1,4 @@
-"""evals.framework.core — agent-agnostic evaluation protocols and types.
+"""evals.framework.core — agents-agnostic evaluation protocols and types.
 
 The design language for all evals in this project. Deliberately stdlib-only
 and import-free from the rest of the codebase — the spine never knows what
@@ -6,7 +6,7 @@ it is evaluating.
 
 LangSmith handles the run loop, storage, aggregation, and regression
 tracking. These protocols are the seam: Task and Evaluator are what you
-implement per agent; DatasetSource is how you load golden cases. The
+implement per agents; DatasetSource is how you load golden cases. The
 LangSmith adapter (langsmith_adapter.py) translates them to LangSmith's
 calling conventions.
 
@@ -67,7 +67,7 @@ class Usage:
 class Task(Protocol[Input, Output]):
     """The system under test behind one async call.
 
-    One implementation per agent. ``output`` is None when the LLM call
+    One implementation per agents. ``output`` is None when the LLM call
     failed to produce a parseable result — a scored failure mode, not an
     exception.
     """

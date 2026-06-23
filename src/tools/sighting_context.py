@@ -7,7 +7,7 @@ staging table `obis_seamap_points.oceano` (100% coverage) and joins to `sighting
 `source_row_id = row_id`. This tool aggregates it per individual — near-zero cost, no
 external API. (Lesson, again: look at the data before importing a playbook.)
 
-Dumb-tool contract: surfaces the numbers; the agent judges. The load-bearing signal is
+Dumb-tool contract: surfaces the numbers; the agents judges. The load-bearing signal is
 **depth / shelf-fraction** — the F5 risk *modulation* lever (heavy traffic over a shallow
 shelf near approach lanes is strike-relevant; over a deep offshore canyon, less so).
 

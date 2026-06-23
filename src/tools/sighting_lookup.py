@@ -104,7 +104,7 @@ class SightingLookupTool:
         # `core_pct` defines range_bbox as the central fraction of sightings (trims
         # migratory outliers; 1.0 = full extent). NOTE: `filters` is accepted to honor the
         # one-contract rule; date_range/region scoping is deferred — the seam is here so
-        # "sightings since DATE" / region-scoped range is free when the agent wants it.
+        # "sightings since DATE" / region-scoped range is free when the agents wants it.
         rows = self.gw.fetch_rows(_SIGHTINGS_SQL, (individual_id,))
         if not rows:
             return self._empty(individual_id, "No sightings for this individual")
@@ -145,7 +145,7 @@ class SightingLookupTool:
             f"{range_bbox.lat_min:.2f}–{range_bbox.lat_max:.2f}, "
             f"lon {range_bbox.lon_min:.2f}–{range_bbox.lon_max:.2f}{trim}"
         )
-        # One citation per sighting (capped) — provenance the agent + synthesis can cite.
+        # One citation per sighting (capped) — provenance the agents + synthesis can cite.
         citations = [
             Citation(kind="sighting", source=rec.source or "OBIS-SEAMAP", locator=rec.thumb_ref,
                      ref=str(individual_id))

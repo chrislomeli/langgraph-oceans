@@ -6,7 +6,7 @@ Project-wide exception hierarchy.
 Why a hierarchy?
 ────────────────
 Code that catches errors should be able to distinguish a transport failure
-from an agent failure from a config failure without parsing message strings.
+from an agents failure from a config failure without parsing message strings.
 Bare ``ValueError`` and ``KeyError`` are too coarse for that.
 
 All project-raised exceptions inherit from :class:`OgarError` so callers
@@ -49,7 +49,7 @@ class TransportError(OgarError):
 
 
 class AgentError(OgarError):
-    """Failure inside an agent graph (state, routing, classification)."""
+    """Failure inside an agents graph (state, routing, classification)."""
 
 
 class ResourceError(OgarError):

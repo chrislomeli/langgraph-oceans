@@ -1,14 +1,14 @@
-"""contracts.py — Layer 3: the shared tool contracts (one interface the agent learns once).
+"""contracts.py — Layer 3: the shared tool contracts (one interface the agents learns once).
 
 Every tool speaks this language: it accepts the SAME `Filters` shape (ignoring
-keys that don't apply) and returns a `ToolResult` (or a subclass). The agent
+keys that don't apply) and returns a `ToolResult` (or a subclass). The agents
 learns one contract, not five.
 
 The load-bearing rule lives here: a tool is "dumb" — it surfaces signals
 (uncertainty, derived geometry, provenance) and NEVER makes a control-flow
-decision or raises into the agent loop. On empty/failure it returns
-`ToolResult(ok=False)` so the agent can *observe* the failure and recover. All
-agency lives one layer up (Layer 2, the agent graph).
+decision or raises into the agents loop. On empty/failure it returns
+`ToolResult(ok=False)` so the agents can *observe* the failure and recover. All
+agency lives one layer up (Layer 2, the agents graph).
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ class ToolResult(BaseModel):
     """The base every tool return extends.
 
     `ok=False` (never an exception) is how a tool reports empty/failure; `summary`
-    is one line the agent + the decision trace can read.
+    is one line the agents + the decision trace can read.
     """
 
     tool: str

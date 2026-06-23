@@ -1,9 +1,9 @@
-"""evals.framework.evaluators — reusable, agent-agnostic scoring strategies.
+"""evals.framework.evaluators — reusable, agents-agnostic scoring strategies.
 
 These are the "scoring toolkit" half of an evaluator. Each strategy is generic
 and is wired to a specific output via accessor callables you pass in — so you
-build the strategies once, and per agent you only choose *which strategy reads
-which field*. None of them import anything agent-specific.
+build the strategies once, and per agents you only choose *which strategy reads
+which field*. None of them import anything agents-specific.
 
     BooleanVote      — majority vote of a boolean decision vs expected (exact)
     NumericTolerance — mean of a number within ±tolerance of expected (banded + MAE)
@@ -28,8 +28,8 @@ def _majority(flags: Sequence[bool]) -> bool:
 
 # ── Retrieval geometry ────────────────────────────────────────────────────────
 # Both ground-truth anchors and retrieved chunks reduce to the same shape: a
-# located code region. Keeping the geometry here (not in any agent) is what lets
-# RetrievalRanking stay agent-agnostic — the agent only supplies accessors that
+# located code region. Keeping the geometry here (not in any agents) is what lets
+# RetrievalRanking stay agents-agnostic — the agents only supplies accessors that
 # turn its own chunk type into Spans.
 
 

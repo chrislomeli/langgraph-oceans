@@ -1,6 +1,6 @@
 """photo_id.py — Layer 3 perception tool: "which catalogued individual is this whale photo?"
 
-The agent's eyes. Roadmap item 5. Flow:
+The agents's eyes. Roadmap item 5. Flow:
 
   query image
     → embed with the SAME model as the catalog (shared space; via Layer-5 ImageEmbedder)
@@ -10,7 +10,7 @@ The agent's eyes. Roadmap item 5. Flow:
 
 Dumb-tool contract (see contracts.py): this tool SURFACES signals — ranked
 candidates, `margin` (how clearly #1 beats #2), and `abstain` (top score below
-threshold) — but it does NOT decide what to do about them. The agent (Layer 2)
+threshold) — but it does NOT decide what to do about them. The agents (Layer 2)
 owns that judgment: disambiguate on a small margin, route to recovery on abstain.
 On an empty catalog it returns `ok=False`, never raises.
 
@@ -46,7 +46,7 @@ N_CANDIDATE_IMAGES = 50
 # embedder = 0.539 → shipped at 0.54. NOT a confident gate: genuine (median 0.557)
 # and impostor (0.478) distributions overlap heavily, so at this cutoff ~43% of
 # KNOWN whales read as NOVEL and ~16% of NOVEL animals read as a match (balanced
-# acc ~0.70 — the ceiling of open-set detection on a reid@1=0.62 model). The agent
+# acc ~0.70 — the ceiling of open-set detection on a reid@1=0.62 model). The agents
 # (Layer 2) should treat `abstain` as a SOFT prior, corroborated by `margin` and
 # downstream sighting/location evidence — never as a verdict. Recalibrate if the
 # embedder changes. (Was 0.80, a leftover CLIP-cosine value that abstained on ~93%
@@ -72,7 +72,7 @@ class Candidate(BaseModel):
 
 
 class PhotoIDResult(ToolResult):
-    """Ranked candidates + the two judgment signals the agent reasons over."""
+    """Ranked candidates + the two judgment signals the agents reasons over."""
 
     candidates: list[Candidate] = Field(default_factory=list)  # ranked, best first
     abstain: bool = True  # top score < threshold → treat as NOVEL  (open→closed seam)
@@ -189,7 +189,7 @@ class PhotoIDTool:
     ) -> PhotoIDResult:
         # NOTE: `filters` is accepted to honor the one-contract rule but not yet
         # applied — species/region/date would filter by JOINing fluke_embeddings →
-        # sightings → individuals. Deferred to the agent-integration step (the
+        # sightings → individuals. Deferred to the agents-integration step (the
         # closed-set demo doesn't need it yet); the seam is here so it's free later.
         # `restrict_individual_ids` is the general "search within this candidate
         # set" seam — the reid eval supplies its split's gallery; the tool stays

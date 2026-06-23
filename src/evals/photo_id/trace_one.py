@@ -80,7 +80,7 @@ def main() -> None:
 
     # ── STEP 4: collapse images → ranked INDIVIDUALS (the tool's real output) ──
     # query_by_vector aggregates the per-image hits into one row per whale (best
-    # photo wins) → the Candidate list the agent/eval actually sees.
+    # photo wins) → the Candidate list the agents/eval actually sees.
     result = tool.query_by_vector(qvec, k=5, exclude_sighting_id=held_out_sighting)
     print("\nSTEP 4 — collapsed to ranked INDIVIDUALS (top 5 candidates):")
     for i, c in enumerate(result.candidates, 1):

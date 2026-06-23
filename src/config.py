@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     # embedder_ver: str = "clip-vitb32-v1"          # raw open_clip baseline (floor)
     # embedder_ver: str = "clip-hf-vitb32-v1"       # HF CLIP base (LoRA's fair baseline)
     # embedder_ver: str = "clip-hf-vitb32-lora-v2"  # CLIP + LoRA + SupCon (reid@1 0.27)
-    # embedder_ver: str = "effnetv2s-arcface-v3"
+    embedder_ver: str = "effnetv2s-arcface-v3"
 
     # ── LLM credentials ───────────────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None

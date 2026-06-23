@@ -166,7 +166,7 @@ def main() -> None:
             evaluators=evaluators,
             dataset_name=dataset.name,
             experiment_prefix=prefix,
-            num_repetitions=1,  # retrieval is deterministic — no REPEATS needed (unlike the agent)
+            num_repetitions=1,  # retrieval is deterministic — no REPEATS needed (unlike the agents)
             output_model=PhotoIDResult,
             client=client,  # same client we flush, so feedback fully drains
         )

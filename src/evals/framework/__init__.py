@@ -1,7 +1,7 @@
-"""evals.framework — agent-agnostic evaluation protocols.
+"""evals.framework — agents-agnostic evaluation protocols.
 
 core.py + evaluators.py are pure local code (no langsmith). Task and
-Evaluator are what you implement per agent; DatasetSource is how you load
+Evaluator are what you implement per agents; DatasetSource is how you load
 golden cases. Two orchestrators consume the same protocol objects:
 
     local_runner.py      — in-process loop, scores natively, no langsmith

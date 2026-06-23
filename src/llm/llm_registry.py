@@ -154,14 +154,14 @@ models: dict[LLMLabel, LLMModel | None] = {
 
 
 # ── Role → model label mapping ────────────────────────────────────────────────
-# Maps agent role → LLMLabel. This is the SINGLE source of truth: the
+# Maps agents role → LLMLabel. This is the SINGLE source of truth: the
 # composition root (main.py) builds the registry from this dict. Change a
 # label here to swap the model for that role everywhere.
 #
 # Only roles that are actually consumed via llm_registry.get(<role>) belong
 # here — listing a role nothing requests is just a lie waiting to mislead.
 # Consumers today:
-#   - "classifier"        : cluster agent  (agents/cluster/nodes.py)
+#   - "classifier"        : cluster agents  (agents/cluster/nodes.py)
 #   - "logistics"         : logistics ReAct loop, Phase 1 (agents/logistics/nodes.py)
 #   - "logistics_extract" : logistics structured extraction, Phase 2 (same file)
 #

@@ -2,7 +2,7 @@
 
 The multi-hop payoff tool. `sighting_lookup` computes an individual's range as a
 BBox; this tool reads the AIS shipping-traffic raster over that BBox and returns
-the traffic metrics. The agent (Layer 2) decides whether that's a *risk* — this
+the traffic metrics. The agents (Layer 2) decides whether that's a *risk* — this
 tool only surfaces the numbers (dumb-tool contract, see contracts.py).
 
 The data: `datasets.ais_YYYY` are PostGIS rasters of vessel **transit counts** per
@@ -41,7 +41,7 @@ DEFAULT_YEAR = 2024
 
 
 class VesselTrafficResult(ToolResult):
-    """Traffic metrics over a region — raw signals; the agent judges 'risk'."""
+    """Traffic metrics over a region — raw signals; the agents judges 'risk'."""
 
     region: BBox
     year: int

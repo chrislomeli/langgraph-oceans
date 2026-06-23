@@ -16,7 +16,7 @@ bootstrap) and passed to graph builders. Importing it here from
 ``prompts.registry`` keeps the public import path stable while the
 implementation lives in its own module.
 
-The dependency arrow inside this project is always ``agent → prompt``.
+The dependency arrow inside this project is always ``agents → prompt``.
 This package never imports from ``agents/`` — agents register the
 Pydantic models they want their templates to reference at startup.
 """

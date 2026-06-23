@@ -27,8 +27,8 @@ from pydantic import BaseModel, Field
 # Generic default — domain-neutral framing. Pass system_prompt= to make_llm_judge
 # when the eval domain benefits from more specific context for the judge.
 _DEFAULT_SYSTEM = """\
-You are an impartial evaluator scoring an AI agent's output against provided criteria.
-You will be given evaluation criteria and the agent's output to score.
+You are an impartial evaluator scoring an AI agents's output against provided criteria.
+You will be given evaluation criteria and the agents's output to score.
 Score it from 0.0 to 1.0:
   0.0 = output does not meet the criteria at all
   0.5 = output partially meets the criteria
