@@ -4,16 +4,17 @@ The chat backend (uvicorn) is just ONE caller of ocean_runner. This file is a se
 caller: it builds a TurnRequest by hand and pulls frames out of the runner with an
 `async for`. Same generator, same breakpoints — minus HTTP, SSE, and the proxy.
 
-    uv run python src/debug_runner.py
+    uv run python -m app.debug_runner
 
 To step through it: set a breakpoint inside ocean_runner (e.g. the `yield Token(...)`
-line in chat_app.py) and run THIS file under the PyCharm/VS Code debugger.
+line in app/chat_app.py) and run THIS file under the PyCharm/VS Code debugger.
 """
 import asyncio
 
 from agent_chat.protocols import TurnRequest
 
-from chat_app import ocean_runner  # your callback — imported and called directly
+from app.chat_app import ocean_runner  # your callback — imported and called directly
+from config import get_settings
 
 # Edit this to ask different things. The [query photo at: <path>] marker is what makes
 # the agent call photo_id; drop it and you'll get the no-tools answer instead.
@@ -35,4 +36,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    get_settings()
     asyncio.run(main())

@@ -24,8 +24,7 @@ from time import perf_counter
 from typing import Any
 
 from agents.commons.node_metrics import metrics
-from agents.commons.node_types import NodeError
-from agents.commons.schemas import TracedState
+from agents.commons.node_types import NodeError, TracedState
 from agents.commons.state_types import StatusValue
 
 

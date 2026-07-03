@@ -15,6 +15,8 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
+from agents.commons.state_types import StatusValue
+
 
 class NodeError(BaseModel):
     """
@@ -40,4 +42,24 @@ class NodeError(BaseModel):
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="UTC timestamp when error was captured",
+    )
+
+
+class TracedState(BaseModel):
+    """
+    Minimum contract that node_executor requires from any graph state.
+
+    Agent state classes inherit from this to get the three fields the
+    execution framework needs:
+      - session_id: for request tracing across nodes
+      - status: for the state machine (idle/processing/completed/error)
+      - error: for structured error capture on exception
+    """
+
+    session_id: str | None = Field(
+        default=None, description="Request correlation ID for tracing across nodes/graphs"
+    )
+    status: StatusValue = Field(default=StatusValue.IDLE, description="Current state machine value")
+    error: NodeError | None = Field(
+        default=None, description="Structured error record if last node raised exception"
     )

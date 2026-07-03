@@ -14,7 +14,7 @@ stop). This runner only TRANSLATES the graph's event stream into Frames the UI s
 
 Run it (from the repo root — needs src on the path and your env file for the API key):
 
-    AI_ENV_FILE=.env uv run uvicorn chat_app:app --reload --app-dir src
+    AI_ENV_FILE=.env uv run uvicorn app.chat_app:app --reload --app-dir src
 
 Then point the existing React front end (examples/react-journal in the agent_chat
 repo) at http://localhost:8000, send a question, and watch tokens stream.
@@ -29,7 +29,6 @@ from agent_chat import create_chat_app
 from agent_chat.actions import Token, ToolCall
 from agent_chat.protocols import TurnRequest
 
-from agents.commons.schemas import Colors
 from agents.sandbox_agent.graph import build_graph
 from config import get_settings
 
@@ -63,17 +62,14 @@ async def ocean_runner(request: TurnRequest) -> AsyncIterator:
     tool calls (ToolCall). Everything else (routing, the ReAct loop) stays inside
     the graph and never surfaces here.
     """
+    # Seed session_id into the graph state (OceanState inherits it from TracedState):
+    # node_executor stamps it on every metric/error record, so a turn is traceable by
+    # request. Same id will key the checkpointer's thread_id when multi-turn lands.
     async for event in GRAPH.astream_events(
-        {"messages": [HumanMessage(request.message)]},
+        {"messages": [HumanMessage(request.message)], "session_id": request.session_id},
         version="v2",
     ):
         kind = event["event"]
-
-        # DEBUG: print EVERY event so you can watch the full sequence of one turn.
-        # The `name` tells you which node/tool/model the event came from. Most of
-        # these fall through the if/elif below unhandled — that's the point: you see
-        # how few of them a chat UI actually forwards. Delete when it's no longer useful.
-        print(f"{Colors.GREY}[event] {kind:24} name={event.get('name')}{Colors.RESET}")
 
         if kind == "on_chat_model_stream":
             # the model produced a piece of its answer — stream it to the bubble

@@ -17,15 +17,33 @@ TIER SPLIT (memory: agentic-division-of-labor)
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import START, MessagesState, StateGraph
+from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langgraph.graph import START, StateGraph
+from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
+from pydantic import Field
 
 from agents.commons import node_executor
+from agents.commons.node_types import TracedState
 from agents.tools import TOOLS
 from config import get_settings
+
+
+class OceanState(TracedState):
+    """The agent's graph state.
+
+    Inherits the traced infrastructure fields (session_id, status, error) from
+    TracedState — so `node_executor`'s metrics/error handling actually have a home —
+    and adds the ReAct message channel with the `add_messages` reducer (the same
+    appending behavior LangGraph's MessagesState gives, now on a pydantic base).
+    """
+
+    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
+
 
 # DECIDE (tier 3): claude-opus-4-8 = strongest reasoning for decomposition;
 # claude-sonnet-4-6 = cheaper/faster if the loop iterates a lot. One-line swap.
@@ -74,13 +92,13 @@ def build_graph():
     llm = _llm()
 
     @node_executor("agent_node")
-    def agent_node(state: MessagesState) -> dict:
-        messages = [SystemMessage(SYSTEM_PROMPT)] + state["messages"]
+    def agent_node(state: OceanState) -> dict:
+        messages = [SystemMessage(SYSTEM_PROMPT)] + state.messages
         return {"messages": [llm.invoke(messages)]}
 
 
-    b = StateGraph(MessagesState)
-    b.add_node("agents", agent_node)
+    b = StateGraph(OceanState)  # noqa  (PyCharm can't match TypedDict to StateT bound)
+    b.add_node("agents", agent_node)  # noqa  (PyCharm can't match TypedDict to StateT bound)
     b.add_node("tools", ToolNode(TOOLS))
     b.add_edge(START, "agents")
     b.add_conditional_edges("agents", tools_condition)  # → tools if tool_calls else END
@@ -97,7 +115,7 @@ def run_agent(question: str, image_path: str | None = None) -> list:
     """
     content = question if not image_path else f"{question}\n\n[query photo at: {image_path}]"
     graph = build_graph()
-    result = graph.invoke({"messages": [HumanMessage(content)]})
+    result = graph.invoke({"messages": [HumanMessage(content)]})  # noqa  (PyCharm can't match TypedDict to StateT bound) 
     return result["messages"]
 
 

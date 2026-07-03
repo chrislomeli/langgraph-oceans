@@ -6,20 +6,22 @@
 ## What we're doing right now
 
 - **Coming up to speed on the chat interface** — the streaming front-door to the agent.
-- Two new files are sitting in the repo **root** and **need to be moved** once we're done
-  poking at them:
-  - `src/chat_app.py` — the streaming backend (`ocean_runner`): the ONE seam between the
+- The two entry points now live in the **`src/app/`** shell (moved out of root 2026-07-03):
+  - `src/app/chat_app.py` — the streaming backend (`ocean_runner`): the ONE seam between the
     LangGraph graph and the `agent_chat` chat UI.
-  - `src/debug_runner.py` — a no-server driver that calls `ocean_runner` directly so we
+  - `src/app/debug_runner.py` — a no-server driver that calls `ocean_runner` directly so we
     can set breakpoints and watch frames without HTTP/SSE.
-- **Chris is running + debugging `debug_runner.py`** to get a feel for this simple flow
+- **Chris is running + debugging `app/debug_runner.py`** to get a feel for this simple flow
   before adding more functionality. (One-step-at-a-time — don't bolt on features yet.)
+- Next moves per `docs/design/app-context-design.md`: (1) platform libs → `src/core/`,
+  (2) `agents/commons` triage (prune dead wildfire code, then survivors → `core/agents/`),
+  (3) wire the composition root `build_context()` in `app/`.
 
 ## The flow we're studying
 
 ```
 debug_runner.main()
-  → ocean_runner(TurnRequest)            # src/chat_app.py
+  → ocean_runner(TurnRequest)            # src/app/chat_app.py
       → GRAPH.astream_events(...)        # the sandbox_agent ReAct graph, built once
           START → agents → tools → agents → … → END
       → yields Token / ToolCall frames   # translated from graph events
@@ -38,10 +40,10 @@ debug_runner.main()
 
 ```bash
 # direct, breakpoint-friendly (what Chris is doing now)
-uv run python src/debug_runner.py
+uv run python -m app.debug_runner
 
 # full streaming server + React front end
-AI_ENV_FILE=.env uv run uvicorn chat_app:app --reload --app-dir src
+AI_ENV_FILE=.env uv run uvicorn app.chat_app:app --reload --app-dir src
 
 # single-shot CLI (no streaming)
 uv run python -m agents.sandbox_agent.cli "<question>" --image PATH --trace
@@ -60,10 +62,20 @@ uv run python -m agents.sandbox_agent.cli "<question>" --image PATH --trace
 
 ## Loose ends / when we pick this up
 
-- [ ] Move `chat_app.py` + `debug_runner.py` out of root into a sensible home.
-- [ ] Remove (or env-gate) the `[event]` debug print in `ocean_runner`.
-- [ ] Decide what `commons/` we actually keep vs. drop from the ported world-simulator
-      layer; reconcile its `TracedState`/`session_id` with the graph's `MessagesState`.
+- [x] Move `chat_app.py` + `debug_runner.py` out of root → now in `src/app/` (2026-07-03).
+- [x] Remove the `[event]` debug print in `ocean_runner` (deleted 2026-07-03 with `Colors`).
+- [x] Weed `commons/`: deleted `risk_view.py` + `schemas.py` (dead wildfire code);
+      rescued `TracedState` → `node_types.py`. Survivors are all generic infra now:
+      node_executor, node_types (NodeError+TracedState), node_metrics, state_types,
+      agent_dependencies, routing (route_base — KEEP as future infra, currently unused).
+      These are the set earmarked for `core/agents/` when the `core/` move happens.
+- [x] Reconciled `TracedState` with the graph state (2026-07-03): the graph now runs on
+      `OceanState(TracedState)` — a pydantic state = the traced fields (session_id, status,
+      error) + a `messages` channel (`add_messages` reducer). `node_executor`'s metrics/
+      error handling now have real channels to write to (verified: reducer appends AND
+      status/error/session_id persist; ToolNode + tools_condition accept the pydantic state).
+      Next: seed `session_id` from `TurnRequest` at invoke so tracing is populated (ties to
+      the `thread_id`/checkpointer work).
 - [ ] None of the agent restructure is committed yet — `src/agent/` → `src/agents/`.
 
 ## Where we're heading (next, after we're comfortable with the flow)
