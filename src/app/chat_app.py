@@ -22,20 +22,16 @@ repo) at http://localhost:8000, send a question, and watch tokens stream.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
+from fastapi import FastAPI
 from langchain_core.messages import HumanMessage
 
 from agent_chat import create_chat_app
-from agent_chat.actions import Token, ToolCall
+from agent_chat.actions import RunnerFrame, Token, ToolCall
 from agent_chat.protocols import TurnRequest
 
-from agents.sandbox_agent.graph import build_sandbox_graph
-from core.config import get_settings
-
-# Build the compiled graph once at startup (constructing the LLM client is cheap —
-# no API call happens until a turn actually runs). Reused across every request.
-get_settings().apply_langsmith()  # optional LangSmith tracing, same as the CLI
-GRAPH = build_sandbox_graph()
+from app.context import AppContext, build_context
 
 
 def _text_chunks(content) -> list[str]:
@@ -54,7 +50,7 @@ def _text_chunks(content) -> list[str]:
     return out
 
 
-async def ocean_runner(request: TurnRequest) -> AsyncIterator:
+async def ocean_runner(request: TurnRequest, ctx: AppContext) -> AsyncIterator:
     """Drive the ocean-conservation graph for one turn, yielding Frames.
 
     The user's message goes in as a HumanMessage; we stream the graph's events and
@@ -63,9 +59,13 @@ async def ocean_runner(request: TurnRequest) -> AsyncIterator:
     the graph and never surfaces here.
     """
     # Seed session_id into the graph state (OceanState inherits it from TracedState):
-    # node_executor stamps it on every metric/error record, so a turn is traceable by
+    # node_executor stamps it on every me       tric/error record, so a turn is traceable by
     # request. Same id will key the checkpointer's thread_id when multi-turn lands.
-    async for event in GRAPH.astream_events(
+    graph = ctx.graph
+    # noqa on the input: OceanState is a pydantic model, so PyCharm rejects the plain
+    # dict — but langgraph validates dict→state at runtime. Same limitation the graph
+    # builder noqa's (graph.py: "PyCharm can't match TypedDict to StateT bound").
+    async for event in graph.astream_events(  # noqa
         {"messages": [HumanMessage(request.message)], "session_id": request.session_id},
         version="v2",
     ):
@@ -89,4 +89,48 @@ async def ocean_runner(request: TurnRequest) -> AsyncIterator:
     # memory / ask-human comes later (add a checkpointer keyed on request.session_id).
 
 
-app = create_chat_app(runner=ocean_runner, title="Ocean Conservation Agent")
+class OceanRunner:
+    """Binds the process-scoped AppContext to agent_chat's request-only TurnRunner.
+
+    `create_chat_app` wants a `runner(request) -> AsyncIterator[Frame]`, but the
+    translation logic (`ocean_runner`) also needs the ctx. This holds ctx as
+    read-only instance state and delegates each turn to `ocean_runner`, so the
+    framework never sees the context — it lives here, at the composition seam.
+
+    ONE instance is shared across every concurrent request, so it must stay
+    effectively immutable after startup: hold ctx (shared deps) here, NEVER
+    per-turn state — that belongs in the graph/checkpointer, keyed by session_id.
+
+    ctx is filled at startup, not import. The server's lifespan sets it after
+    `build_context()`; `debug_runner` passes it straight to the constructor.
+    """
+
+    def __init__(self, ctx: AppContext | None = None) -> None:
+        self.ctx = ctx
+
+    def __call__(self, request: TurnRequest) -> AsyncIterator[RunnerFrame]:
+        if self.ctx is None:
+            raise RuntimeError(
+                "OceanRunner has no AppContext — build_context() must run first "
+                "(the server does this in its lifespan; debug_runner passes it in)."
+            )
+        return ocean_runner(request, self.ctx)
+
+
+# A stable runner object exists at import so create_chat_app can wire it into its
+# router now; its ctx is populated at startup by the lifespan below — so importing
+# this module (e.g. under uvicorn --reload) does no heavy work.
+runner = OceanRunner()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Startup: build the process context ONCE and bind it to the shared runner.
+
+    Teardown (after `yield`) — closing pools, etc. — lands here later.
+    """
+    runner.ctx = build_context()
+    yield
+
+
+app = create_chat_app(runner=runner, lifespan=lifespan, title="Ocean Conservation Agent")
