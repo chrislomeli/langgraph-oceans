@@ -13,9 +13,10 @@
     can set breakpoints and watch frames without HTTP/SSE.
 - **Chris is running + debugging `app/debug_runner.py`** to get a feel for this simple flow
   before adding more functionality. (One-step-at-a-time — don't bolt on features yet.)
-- Next moves per `docs/design/app-context-design.md`: (1) platform libs → `src/core/`,
-  (2) `agents/commons` triage (prune dead wildfire code, then survivors → `core/agents/`),
-  (3) wire the composition root `build_context()` in `app/`.
+- Progress per `docs/design/app-context-design.md`: (1) ✅ platform libs → `src/core/`,
+  (2) ✅ `agents/commons` triaged → `core/agents/`, (3) ⬜ NEXT: wire the composition root
+  `build_context()` in `app/` (builds `AgentDependencies`, owns the checkpointer), then the
+  checkpointer/`thread_id` for multi-turn memory.
 
 ## The flow we're studying
 
@@ -49,16 +50,23 @@ AI_ENV_FILE=.env uv run uvicorn app.chat_app:app --reload --app-dir src
 uv run python -m agents.sandbox_agent.cli "<question>" --image PATH --trace
 ```
 
-## Map of the agent code (recent restructure, not yet committed)
+## Map of the code — three tiers (restructured 2026-07-03, not yet committed)
 
-- `src/agents/sandbox_agent/` — the ocean agent: `graph.py` (ReAct loop, `SYSTEM_PROMPT`,
-  Opus 4.8), `cli.py`.
-- `src/agents/tools.py` — the 4 LLM-callable tools + their "ads" (docstrings the model
-  reads to pick a tool). photo_id, sighting_lookup, sighting_context, vessel_traffic.
-- `src/agents/commons/` — **generic agent infra being ported in from another project**
-  (docstrings still say "world-simulator / cluster agents / supervisor"). Currently wired
-  via `@node_executor("agent_node")` for metrics + error handling. Note: the graph uses
-  plain `MessagesState` (no `session_id`), so the session-tracing half is inert for now.
+Layout follows `docs/design/app-context-design.md`: **core → domain → app shell**, with the
+rule that `core/` imports nothing domain-specific.
+
+- `src/core/` — **PLATFORM** (domain-agnostic; the generic substrate):
+  - `config.py`, `exceptions.py`, `logging_config.py`
+  - `core/llm/` (LLMRegistry), `core/prompts/` (PromptRegistry)
+  - `core/agents/` — generic agent-graph framework: `node_executor`, `node_types`
+    (NodeError + TracedState), `node_metrics`, `state_types`, `routing` (unused), and
+    `dependencies.py` (`AgentDependencies` container — the app-context shape). Docstrings
+    still say "world-simulator" in places — cosmetic cleanup pending.
+- `src/agents/` — **DOMAIN** (the ocean agent): `sandbox_agent/graph.py` (ReAct loop on
+  `OceanState`, `SYSTEM_PROMPT`, Opus 4.8), `sandbox_agent/cli.py`, `tools.py` (the 4
+  LLM-callable tool ads). Also domain: `tools/`, `models/`, `stores/`, `rag/`.
+- `src/app/` — **SHELL** (entry points): `chat_app.py` (server), `debug_runner.py`
+  (no-server driver). Home of the composition root `build_context()` once written.
 
 ## Loose ends / when we pick this up
 
@@ -74,9 +82,16 @@ uv run python -m agents.sandbox_agent.cli "<question>" --image PATH --trace
       error) + a `messages` channel (`add_messages` reducer). `node_executor`'s metrics/
       error handling now have real channels to write to (verified: reducer appends AND
       status/error/session_id persist; ToolNode + tools_condition accept the pydantic state).
-      Next: seed `session_id` from `TurnRequest` at invoke so tracing is populated (ties to
-      the `thread_id`/checkpointer work).
-- [ ] None of the agent restructure is committed yet — `src/agent/` → `src/agents/`.
+      Then: seed `session_id` from `TurnRequest` at invoke so tracing is populated.
+- [x] Seeded `session_id` from `TurnRequest` into the graph state (2026-07-03): `ocean_runner`
+      passes it in the input dict → `node_executor` stamps it on metrics + NodeError (verified
+      the id flows end-to-end). CLI path (`run_agent`) doesn't seed it — traces show `<OceanState>`.
+- [x] `core/` move done (2026-07-03): `config/exceptions/logging_config/llm/prompts` +
+      `commons` → `src/core/`; ~22 import rewrites to `core.*`; `pyproject` include updated;
+      verified (compileall + all-layer import smoke + behavioral smokes pass).
+- [ ] None of the agent restructure is committed yet — `src/agent/` → `src/agents/` → `core/` + `app/`.
+- [ ] Cosmetic: world-simulator docstring headers still in `core/config.py`, `core/agents/*`,
+      `core/llm/llm_registry.py` (stale `from config import build_llm_registry` example, etc.).
 
 ## Where we're heading (next, after we're comfortable with the flow)
 

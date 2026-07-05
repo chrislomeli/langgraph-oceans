@@ -27,10 +27,10 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from pydantic import Field
 
-from agents.commons import node_executor
-from agents.commons.node_types import TracedState
+from core.agents import node_executor
+from core.agents.node_types import TracedState
 from agents.tools import TOOLS
-from config import get_settings
+from core.config import get_settings
 
 
 class OceanState(TracedState):
@@ -87,7 +87,7 @@ def _llm():
     return ChatAnthropic(model=MODEL, api_key=key).bind_tools(TOOLS)
 
 
-def build_graph():
+def build_sandbox_graph():
     """Compile the ReAct graph. Constructing the LLM is cheap (no API call until invoke)."""
     llm = _llm()
 
@@ -114,7 +114,7 @@ def run_agent(question: str, image_path: str | None = None) -> list:
     the final message is the answer.
     """
     content = question if not image_path else f"{question}\n\n[query photo at: {image_path}]"
-    graph = build_graph()
+    graph = build_sandbox_graph()
     result = graph.invoke({"messages": [HumanMessage(content)]})  # noqa  (PyCharm can't match TypedDict to StateT bound) 
     return result["messages"]
 
@@ -122,7 +122,7 @@ def run_agent(question: str, image_path: str | None = None) -> list:
 if __name__ == "__main__":
     # Smoke: compile the graph and show its structure. No LLM call (no cost).
     # Run: uv run python -m agents.graph
-    g = build_graph()
+    g = build_sandbox_graph()
     print("compiled OK. nodes:", list(g.get_graph().nodes))
     print("tools bound:", [t.name for t in TOOLS])
     print("\nSYSTEM_PROMPT is a stub:", SYSTEM_PROMPT.startswith("STUB"))

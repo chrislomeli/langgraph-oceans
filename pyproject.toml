@@ -93,14 +93,12 @@ known-first-party = ["config", "exceptions", "logging_config", "evals", "llm", "
 # site-packages that would shadow the live source under src/.
 sources = ["src"]
 include = [
-    "src/config.py",
-    "src/exceptions.py",
-    "src/logging_config.py",
+    "src/core",
     "src/py.typed",
+    "src/agents",
+    "src/app",
     "src/evals",
-    "src/llm",
     "src/models",
-    "src/prompts",
     "src/stores",
     "src/tools",
     "src/training",

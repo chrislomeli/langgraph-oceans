@@ -19,7 +19,7 @@ import torch
 from transformers import CLIPVisionModelWithProjection
 from peft import LoraConfig, get_peft_model
 
-from config import get_settings
+from core.config import get_settings
 
 # Same OpenAI ViT-B/32 weights as the v1 baseline; outputs a 512-d image embedding
 # (matches the fluke_embeddings vector(512) column), so v1↔v2 stays comparable.

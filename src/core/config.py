@@ -10,12 +10,13 @@ Loading order (pydantic-settings resolves in this priority, highest first):
 
 Usage
 ─────
-  from config import Settings, build_llm_registry, LLM_ROLE_CONFIG, models
+  from core.config import Settings
+  from core.llm.llm_registry import build_llm_registry, LLM_ROLE_CONFIG
 
   settings = Settings()
   settings.apply_langsmith()
 
-  registry = build_llm_registry(settings, models, LLM_ROLE_CONFIG)
+  registry = build_llm_registry(settings, LLM_ROLE_CONFIG)
   llm = registry.get("classifier")
   result = llm.invoke(messages)
 

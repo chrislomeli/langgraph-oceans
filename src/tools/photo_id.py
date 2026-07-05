@@ -28,7 +28,7 @@ from collections.abc import Sequence
 from pgvector import Vector
 from pydantic import BaseModel, Field
 
-from config import get_settings
+from core.config import get_settings
 from models.image_embedder import ImageEmbedder
 from stores.postgres import get_pg_gateway
 from tools.contracts import Citation, Filters, ToolResult

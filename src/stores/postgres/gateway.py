@@ -35,7 +35,7 @@ from pgvector.psycopg import register_vector
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from config import get_settings
+from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 

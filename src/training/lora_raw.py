@@ -13,7 +13,7 @@ import torch
 from peft import LoraConfig, get_peft_model
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 
-from config import get_settings
+from core.config import get_settings
 from models.image_embedder import pick_device, resolve_spec
 from PIL import Image
 

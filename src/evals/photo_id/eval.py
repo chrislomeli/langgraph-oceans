@@ -139,7 +139,7 @@ def main() -> None:
     if args.langsmith or smoke:
         from langsmith import Client
 
-        from config import get_settings
+        from core.config import get_settings
         from evals.framework.langsmith_adapter import run_langsmith_eval, seed_dataset
         from tools.photo_id import PhotoIDResult
 

@@ -12,7 +12,7 @@ If (A) is mixed and (B) is clean, scoping works. Run:
 
 from __future__ import annotations
 
-from config import get_settings
+from core.config import get_settings
 from stores.postgres.embedder import Embedder
 from stores.postgres.rag_repo import DocumentRepository
 

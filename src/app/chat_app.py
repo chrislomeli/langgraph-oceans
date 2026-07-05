@@ -29,13 +29,13 @@ from agent_chat import create_chat_app
 from agent_chat.actions import Token, ToolCall
 from agent_chat.protocols import TurnRequest
 
-from agents.sandbox_agent.graph import build_graph
-from config import get_settings
+from agents.sandbox_agent.graph import build_sandbox_graph
+from core.config import get_settings
 
 # Build the compiled graph once at startup (constructing the LLM client is cheap —
 # no API call happens until a turn actually runs). Reused across every request.
 get_settings().apply_langsmith()  # optional LangSmith tracing, same as the CLI
-GRAPH = build_graph()
+GRAPH = build_sandbox_graph()
 
 
 def _text_chunks(content) -> list[str]:

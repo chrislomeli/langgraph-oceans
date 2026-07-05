@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from config import get_settings
+from core.config import get_settings
 from models.image_embedder import ImageEmbedder
 
 logging.basicConfig(level=logging.INFO)

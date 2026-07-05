@@ -10,12 +10,13 @@ Loading order (pydantic-settings resolves in this priority, highest first):
 
 Usage
 ─────
-  from config import Settings, build_llm_registry, LLM_ROLE_CONFIG, models
+  from core.config import Settings
+  from core.llm.llm_registry import build_llm_registry, LLM_ROLE_CONFIG
 
   settings = Settings()
   settings.apply_langsmith()
 
-  registry = build_llm_registry(settings, models, LLM_ROLE_CONFIG)
+  registry = build_llm_registry(settings, LLM_ROLE_CONFIG)
   llm = registry.get("classifier")
   result = llm.invoke(messages)
 
@@ -39,8 +40,8 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from config import Settings
-from llm.token_callback import TokenUsageCallback
+from core.config import Settings
+from core.llm.token_callback import TokenUsageCallback
 
 logger = logging.getLogger(__name__)
 
@@ -169,14 +170,6 @@ models: dict[LLMLabel, LLMModel | None] = {
 # pass can use a different model than the tool-calling loop without touching
 # code — see make_extract_plan_node. They point at the same label for now.
 
-LLM_ROLE_CONFIG: dict[str, LLMLabel] = {
-    "classifier": LLMLabel.GPT_MINI,  # fast sensor pattern recognition
-    "logistics": LLMLabel.GPT_MINI,  # ReAct tool-calling loop
-    "logistics_extract": LLMLabel.GPT_MINI,  # transcript → LogisticsAssessment
-    "code_intel_synth": LLMLabel.HAIKU,  # code intelligence synthesis (the doer)
-    "code_intel_judge": LLMLabel.HAIKU,  # answer-quality judging (the grader)
-}
-
 
 # ── LLM Registry ──────────────────────────────────────────────────────────────
 
@@ -205,7 +198,7 @@ class LLMRegistry:
     building the model.
 
     Usage:
-        registry = build_llm_registry(settings, models, LLM_ROLE_CONFIG)
+        registry = build_llm_registry(settings, LLM_ROLE_CONFIG)
         llm = registry.get("classifier")   # built here, on demand
         result = llm.invoke(messages)
     """
@@ -362,17 +355,19 @@ def _build_chat_model(
 
 def build_llm_registry(
     settings: Settings,
-    model_catalog: dict[LLMLabel, LLMModel | None],
     role_config: dict[str, LLMLabel],
+    model_catalog: dict[LLMLabel, LLMModel | None] = models,
 ) -> LLMRegistry:
     """
-    Build an LLMRegistry from settings + model catalog + role config.
+    Build an LLMRegistry from settings + role config (+ an overridable catalog).
 
     Parameters
     ----------
     settings:     Loaded Settings (carries API keys and ollama_base_url).
-    model_catalog: LLMLabel → LLMModel mapping (defined above as `models`).
-    role_config:  role name → LLMLabel mapping (defined above as `LLM_ROLE_CONFIG`).
+    role_config:  role name → LLMLabel mapping (the app's selection of which
+                  roles it wants and which model backs each).
+    model_catalog: LLMLabel → LLMModel menu. Defaults to this module's `models`
+                  catalog — callers only pass it to inject a fake in tests.
 
     STUB roles are skipped — registry.get() will raise KeyError if all
     roles are stubs and there is no fallback.

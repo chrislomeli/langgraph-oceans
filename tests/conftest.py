@@ -29,7 +29,7 @@ def monterey_bbox() -> dict:
 @pytest.fixture
 def catalog_image() -> str:
     """Path to one of #479's catalog photos; skip if the image catalog isn't present."""
-    from config import get_settings
+    from core.config import get_settings
 
     d = get_settings().image_root / str(KNOWN_INDIVIDUAL_ID)
     if not d.is_dir():
@@ -52,7 +52,7 @@ def image_url():
     import socketserver
     import threading
 
-    from config import get_settings
+    from core.config import get_settings
 
     root = get_settings().image_root
     d = root / str(KNOWN_INDIVIDUAL_ID)

@@ -15,7 +15,7 @@ import argparse
 from langchain_core.messages import AIMessage, ToolMessage
 
 from agents.sandbox_agent.graph import run_agent
-from config import get_settings
+from core.config import get_settings
 
 
 def _render_trace(messages: list) -> None:

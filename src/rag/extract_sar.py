@@ -30,7 +30,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 import pdfplumber
 
-from config import get_settings
+from core.config import get_settings
 from stores.postgres.embedder import Embedder
 from stores.postgres.rag_repo import DocumentRepository
 

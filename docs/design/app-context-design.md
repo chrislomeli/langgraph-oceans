@@ -91,15 +91,35 @@ runner, not here. The container's only jobs are **hold** and (via a factory) **b
 
 ## The composition root (build-it)
 
-One function whose whole job is to assemble the container:
+### Context object shape — DECIDED A0.1 (2026-07-04)
+
+`build_context()` returns an **`AppContext(graph, deps)`** — NOT an extended
+`AgentDependencies`. Rationale: `deps` (`AgentDependencies`) is the raw *ingredients*
+(llm_registry, prompt_registry, store); `graph` is the *assembled product* built from them.
+They're different kinds of thing, so they're two fields. `AppContext` lives in `app/context.py`.
+
+**Option 1 (chosen):** grow the shape — `AppContext` starts with only `graph` (A0), and gains
+`deps` in A1 when the registry is actually consumed. Don't add a field until something reads it.
+
+The **target** end-state assembly (post-A1/A2):
 
 ```
-build_context() -> AgentDependencies
-    settings   = get_settings()
-    llm        = build_llm_registry(settings, models, LLM_ROLE_CONFIG)   # ported
-    prompts    = PromptRegistry(...)
-    graph      = build_graph(llm_registry=llm, checkpointer=<see DECIDE>)
-    return AgentDependencies(llm_registry=llm, prompt_registry=prompts, ...)
+build_context() -> AppContext
+    settings = get_settings(); settings.apply_langsmith()
+    deps  = AgentDependencies(                       # the INGREDIENTS
+              llm_registry=build_llm_registry(settings, models, LLM_ROLE_CONFIG),
+              prompt_registry=PromptRegistry(...))
+    graph = build_graph(deps)                        # builder CONSUMES ingredients
+    return AppContext(graph=graph, deps=deps)
+```
+
+The **A0 (behavior-preserving) starting point** — graph only, argless builder, `_llm` untouched:
+
+```
+build_context() -> AppContext
+    settings = get_settings(); settings.apply_langsmith()
+    graph = build_graph()                            # unchanged; still builds its own _llm
+    return AppContext(graph=graph)
 ```
 
 It assembles the **ingredients** — the platform libs (`core/llm/`, `core/prompts/`) and the

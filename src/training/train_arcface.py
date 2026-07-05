@@ -25,7 +25,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from config import get_settings
+from core.config import get_settings
 from models.image_embedder import pick_device
 from models.reid_model import DEFAULT_BACKBONE, ReIDModel, build_preprocess
 from training.train_lora import DECODE_THREADS, build_probe, decode, load_pool

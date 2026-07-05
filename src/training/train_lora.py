@@ -21,7 +21,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 
-from config import get_settings
+from core.config import get_settings
 from data.embed_images import resolve_path
 from models.image_embedder import pick_device
 from stores.postgres import get_pg_gateway

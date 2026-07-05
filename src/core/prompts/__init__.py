@@ -5,7 +5,7 @@ File-based, versioned prompt registry built on Jinja2.
 
 Public API
 ──────────
-    from prompts import PromptRegistry
+    from core.prompts import PromptRegistry
 
     registry = PromptRegistry()
     registry.register_model(MyModel)
@@ -21,6 +21,6 @@ This package never imports from ``agents/`` — agents register the
 Pydantic models they want their templates to reference at startup.
 """
 
-from prompts.registry import PromptRegistry
+from core.prompts.registry import PromptRegistry
 
 __all__ = ["PromptRegistry"]

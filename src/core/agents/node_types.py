@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
-from agents.commons.state_types import StatusValue
+from core.agents.state_types import StatusValue
 
 
 class NodeError(BaseModel):

@@ -39,7 +39,7 @@ import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from pydantic import BaseModel
 
-from exceptions import PromptError
+from core.exceptions import PromptError
 
 DEFAULT_TEMPLATES_DIR = Path(__file__).parent / "templates"
 

@@ -14,7 +14,7 @@ import asyncio
 from agent_chat.protocols import TurnRequest
 
 from app.chat_app import ocean_runner  # your callback — imported and called directly
-from config import get_settings
+from core.config import get_settings
 
 # Edit this to ask different things. The [query photo at: <path>] marker is what makes
 # the agent call photo_id; drop it and you'll get the no-tools answer instead.

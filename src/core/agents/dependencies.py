@@ -9,11 +9,14 @@ infrastructure (``node_types.py``) remain free of heavy framework imports.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from langgraph.store.base import BaseStore
 from pydantic import BaseModel
 
-from llm.llm_registry import LLMRegistry
-from prompts import PromptRegistry
+from core.llm.llm_registry import LLMRegistry
+from core.prompts import PromptRegistry
+from stores.postgres import PgGateway
 
 
 class AgentDependencies(BaseModel):
@@ -21,8 +24,5 @@ class AgentDependencies(BaseModel):
 
     llm_registry: LLMRegistry
     prompt_registry: PromptRegistry
-    # Optional because every consumer already guards for absence
-    # (logistics graph: `data_store is not None`; cluster graph passes
-    # cell_state_manager into a `| None` factory). Stub-mode tests build
-    # partial deps; production always supplies them via composition.
-    store: BaseStore | None = None
+    data_store: PgGateway
+    store: Optional[BaseStore] = None

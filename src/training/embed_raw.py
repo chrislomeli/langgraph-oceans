@@ -26,7 +26,7 @@ import torch
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from PIL import Image
 
-from config import get_settings
+from core.config import get_settings
 from models.image_embedder import pick_device, resolve_spec
 
 # get the basic hf model and device
