@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     # imports are type-checker-only — no runtime cost, no version-path fragility.
     from langgraph.graph.state import CompiledStateGraph
     from core.config import Settings
+    from agents.sandbox_agent.graph import OceanState
 
 
 @dataclass
@@ -44,7 +45,10 @@ class AppContext:
     """
 
     settings: Settings
-    graph: CompiledStateGraph
+    # Parameterized with the state schema so the input type (InputT defaults to StateT)
+    # is concrete — a bare `CompiledStateGraph` leaves InputT at its abstract bound and
+    # rejects the plain-dict input the runner passes to astream_events.
+    graph: CompiledStateGraph[OceanState]
     deps: AgentDependencies
 
 
