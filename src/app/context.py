@@ -1,89 +1,56 @@
-"""app/context.py — the composition root.
-
-The phase-2 (STARTUP) function of the app lifecycle:
+"""app/context.py — the composition root (process-lifecycle STARTUP phase).
 
     import   → definitions only, no heavy work
-    startup  → build_context() runs ONCE, returns the AppContext for the process   ← here
-    request  → the runner receives (request, ctx); builds nothing app-scoped
+    startup  → build_context() runs ONCE, returns the ConversationService     ← here
+    request  → callers invoke service methods; nothing app-scoped is built
     shutdown → teardown (close pools) — later, in lifespan after `yield`
 
-`AppContext` is what the process assembles at startup and hands to the runner. It holds the
-`graph` (the assembled product). It will grow a `deps: AgentDependencies` field in A1 — the
-raw *ingredients* (llm_registry, prompt_registry, store) the builder consumes — per the
-Option-1 decision: don't add a field until something reads it.
+build_context() is the BUILDER: it assembles the capabilities (settings, registries,
+store) plus the process-scoped saver, then constructs the ONE ConversationService the
+process shares. It does NOT define or hold the application logic — the graph lives
+inside the service (application), built from the capabilities (framework). Keep this
+root thin: wire ingredients, hand back the assembled product.
 
-Both entry points build this the same way:
-  - server  (ocean_runner): lifespan builds ctx at startup, a closure hands it to ocean_runner
+Both entry points build the same way:
+  - server  (ocean_runner): lifespan calls build_context() at startup
   - debug   (debug_driver):  main() calls build_context() directly — no server
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from langgraph.checkpoint.memory import MemorySaver
 
-from agents.sandbox_agent.graph import build_sandbox_graph
+from app.conversation_service import ConversationService
 from core.agents.dependencies import AgentDependencies
 from core.config import get_settings
 from core.llm.llm_registry import build_llm_registry, LLMLabel
 from core.prompts import PromptRegistry
 from stores.postgres import get_pg_gateway
 
-if TYPE_CHECKING:
-    # Under `from __future__ import annotations` these are string hints at runtime, so the
-    # imports are type-checker-only — no runtime cost, no version-path fragility.
-    from langgraph.graph.state import CompiledStateGraph
-    from core.config import Settings
-    from agents.sandbox_agent.graph import OceanState
 
-
-@dataclass
-class AppContext:
-    """Everything the process builds once at startup and shares across all requests.
-
-    A pure holder — no building logic lives here. `build_context()` assembles the
-    ingredients and fills these fields; the runner only reads them.
-    """
-
-    settings: Settings
-    # Parameterized with the state schema so the input type (InputT defaults to StateT)
-    # is concrete — a bare `CompiledStateGraph` leaves InputT at its abstract bound and
-    # rejects the plain-dict input the runner passes to astream_events.
-    graph: CompiledStateGraph[OceanState]
-    deps: AgentDependencies
-
-
-def build_context() -> AppContext:
-    """Assemble the process-scoped context. Runs once, at startup — never at import."""
-    #  load settings, and apply LangSmith tracing (as ocean_runner does today)
+def build_context() -> ConversationService:
+    """Assemble the process-scoped ConversationService. Runs once, at startup."""
+    # settings + LangSmith tracing
     settings = get_settings()
     settings.apply_langsmith()
 
-    # initialize the postgres datastore
+    # capabilities bag (framework/infrastructure — the ingredients the service consumes)
     data_store = get_pg_gateway()
-
-    # set up the models we'll be using
     llm_registry = build_llm_registry(
         settings=settings,     # deployment config (keys, env)
         role_config={          # the roles THIS app wants, and the model behind each
             "oceans_agent": LLMLabel.OPUS,
         })                     # model_catalog defaults to the registry's own `models`
-
-    # point to prompt registry
     prompt_registry = PromptRegistry()
-    # prompt_registry.register_models()   # models that we want to provide templates for in system prompts
-
-    # create the composite dependencies that we'll inject to graphs
-    agent_dependencies = AgentDependencies(
+    caps = AgentDependencies(
         prompt_registry=prompt_registry,
         llm_registry=llm_registry,
         data_store=data_store,
     )
 
-    #   2. build the graph the CURRENT (argless) way — leave _llm alone until A1
-    graph = build_sandbox_graph(agent_dependencies)
+    # process-scoped checkpointer. B1: MemorySaver (in-proc). B1.5 swaps in
+    # AsyncPostgresSaver + a shutdown teardown story. The service builds its graph
+    # from caps + saver.
+    saver = MemorySaver()
 
-    #  create the application context
-    ctx = AppContext(settings=settings, graph=graph, deps=agent_dependencies)
-    return ctx
-
-
+    # the application surface — the one object the process shares across all requests
+    return ConversationService(caps, saver=saver)

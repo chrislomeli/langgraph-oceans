@@ -101,7 +101,10 @@ Verdict: the registry (`core/llm/llm_registry.py`) is already seasoned-grade. **
 
 ## Arc B — the context layer (the portfolio work; yours)
 
-### B1 — conversation state (checkpointer)
+### B1 — conversation state (checkpointer) — ✅ DONE 2026-07-06
+
+MemorySaver; wired + verified live (turn 2 recalled "556" + range, zero tool calls). B1.5 upgrades
+the saver to Postgres for durability.
 
 - **B1.1 — Decide the saver.** `[YOU · tier-3 · dep: none]`
   `MemorySaver` (in-proc, dies on restart) vs `SqliteSaver`. *Recommend:* MemorySaver to start.
@@ -120,14 +123,78 @@ Verdict: the registry (`core/llm/llm_registry.py`) is already seasoned-grade. **
   questions; turn 2 references turn 1 (e.g. "what did I just ask?").
   **Done when:** the terminal shows memory carrying across two turns.
 
-### B2 — context assembly (the `/skills`-shaped per-request bundle)
+### B1.5 — durable checkpointer (Postgres) — follow-on to B1
 
-- **B2.0 — Design note first.** `[YOU · tier-3 · dep: B1 done]`
-  This is your design frontier — do NOT let me pre-break it into tickets (that's me doing the
-  thinking). Write the mid-level note: what a named context bundle *is* (tools + data +
-  instructions to load for a class of question), how it's selected, how provenance is tracked.
-  I advise both sides; you decide the shape.
-  **Done when:** `docs/design/context-assembly-design.md` exists; THEN we ticket it like Arc A.
+Harvest `journal_agent/stores/checkpointer.py` — it already runs `AsyncPostgresSaver` with a
+lifecycle-managed pool. NOT the reflection code.
+
+- **B1.5.1 — Decide: stay on MemorySaver, or move to Postgres.** `[YOU · tier-3 · dep: B1.4]`
+  MemorySaver dies on restart. `AsyncPostgresSaver` persists but adds an async pool + teardown.
+  *Recommend:* move when a conversation must outlive a process bounce — a product call, not a
+  mechanism one (the swap is one line; the API is identical).
+  **Done when:** decision recorded here.
+
+- **B1.5.2 — Wire AsyncPostgresSaver.** `[ME · tier-1 · dep: B1.5.1]`
+  `build_context` yields the saver from an async CM (`from_conn_string(url)` + `.setup()`), torn
+  down at shutdown (server lifespan after `yield`; `debug_driver` main). Reuse the existing pg
+  (`stores/postgres`). `thread_id` unchanged.
+  **Done when:** the compiled graph carries a Postgres checkpointer; tables auto-create.
+
+- **B1.5.3 — Keep OceanState thin (serde guard).** `[YOU · tier-2 · dep: B1.5.2]`
+  Journal had to pre-register ~15 domain types (`_ALLOWED_MSGPACK_MODULES`) or the checkpointer
+  dropped nested Pydantic on roundtrip. Oceans' state is `messages` + scalars → default JsonPlus
+  serde works with ZERO registration. Rule: don't put rich domain objects in `OceanState`; if you
+  must, register them like journal did. This is why thin state is a feature.
+  **Done when:** a two-turn conversation survives a full process restart (reload → turn 2 still
+  remembers turn 1).
+
+### B2 — context assembly (rework journal's `ContextBuilder`, made generic)
+
+Harvest `journal_agent/configure/context_builder.py` — NOT the reflection graph. It already does
+**budget + priority-prune** (retrieved → recent → session, to a token budget). Two facts banked
+from the comparison: (a) journal trims at **CALL TIME** — rebuilds the LLM input each turn, never
+mutates persisted state — which SIDESTEPS the `RemoveMessage` / tool_use↔tool_result pairing
+problem that durable pruning of `messages` would hit; (b) journal's builder is fed by a classifier
+node emitting a per-turn `ContextSpecification` — oceans' ReAct loop has no such node, so decide
+what produces the "spec" here.
+
+- **B2.0 — Decide the assembly shape (inline here, NOT a separate doc).** `[YOU · tier-3 · dep: B1 done]`
+  Your design frontier — do NOT let me pre-break it. Decide: what a generic assembler owns (budget +
+  priority prune à la `ContextBuilder`), ephemeral (call-time) vs durable pruning, where it runs
+  (inside `make_agent_node`? a pre-model hook?), and what supplies the per-turn spec absent a
+  classifier node. Keep the ContextBuilder token-budget machinery; strip its journal-specific inputs.
+  **Done when:** the shape is written into THIS section (a short B2 subsection); THEN we ticket the build.
+
+- **B2.1+ — TBD after B2.0.** Ticketed once the shape is decided, Arc-A style.
+
+### B3 — `/skills`: context commands (the menu)
+
+A named, reusable bundle that declares **what to pull into context for a class of request** (tools +
+data + instructions) — the `/skills`-shaped front end to B2's assembly (memory:
+`oceans-direction-context-commands`). Journal does a lightweight version: `user_command` dispatch
+(`/reflect`, `/recall`, `/save`) each pairing to a per-command `ContextSpecification`.
+
+- **B3.0 — Discuss/design the skill shape.** `[YOU · tier-3 · dep: B2.0]`
+  Do NOT pre-ticket. Decide: what a skill IS (a named context bundle, NOT a procedure to run), how
+  it's selected (explicit `/command` vs inferred from the question), how it composes with B2 assembly
+  and the ReAct tool set. Journal's `/command` dispatcher is the concrete precedent to borrow from.
+  **Done when:** the shape is decided + noted here.
+
+---
+
+## Arc C — orchestration (the agent calls workers)
+
+Turn the single ReAct agent into an **orchestrator** that delegates to worker agents/graphs exposed
+to the LLM **as tools** (a worker = a tool whose body is itself a sub-graph). Lets the top agent
+decompose a hard question across specialists without one monolithic prompt/tool set.
+
+- **C1.0 — Discuss/design worker-as-tool.** `[YOU · tier-3 · dep: none; saner after B2]`
+  Do NOT pre-ticket. Decide: the binding seam (same `bind_tools`; the tool body does
+  `subgraph.ainvoke(...)`), shared vs isolated state/checkpointer per worker, how a worker's result
+  re-enters the orchestrator's message stream, whether workers stream tokens. Contrast journal, which
+  invokes sub-graphs INSIDE a node (`reflection_graph.ainvoke` from `make_reflect_node`) — a scripted
+  call, NOT an LLM-chosen tool; the agentic version lets the model decide when to call a worker.
+  **Done when:** the pattern is decided + noted here; THEN ticket the build (tier-1 plumbing = mine).
 
 ---
 
@@ -150,6 +217,24 @@ the way: `bind_tools` (dropped when the LLM moved to the registry) and `temperat
 deprecated@opus-4-8 (registry's hardcoded `temperature=0` — now config-driven via
 `LLMModel.temperature`, opus-4-8 sets `None`). X2 (commit the restructure) is done.
 
-Top unblocked ticket: **B1.1** — you decide the checkpointer saver (under discussion, not yet
-decided). Then B1.2–B1.4 (attach saver → thread `thread_id` → multi-turn verify) → B2.0 (the
-context-assembly design note, your frontier).
+**B1 (checkpointer) is DONE + verified (2026-07-06).** MemorySaver (B1.1); `build_context`
+builds it → `build_sandbox_graph(deps, saver)` compiles with `checkpointer=` (B1.2);
+`ocean_runner` passes `thread_id=session_id` (B1.3); B1.4 proven live in
+`debug_driver.conversation_loop` — two questions on one `session_id`, turn 2 recalled "556" +
+its core range with zero tool calls (rehydrated from turn 1).
+
+Looking forward (added 2026-07-06 from the journal_agent infra comparison — harvest journal's
+plumbing, NOT its reflection/summarization domain code):
+
+- **B1.5** — durable **Postgres checkpointer** (upgrade from MemorySaver). Mostly mine; your call on
+  when + the thin-state serde guard.
+- **B2** — rework journal's **`ContextBuilder`** into a generic context assembler (budget + priority
+  prune). Your design frontier (B2.0), inline in this doc — no separate note.
+- **B3** — **`/skills`** context commands: the menu of named context bundles (the front end to B2).
+- **Arc C** — the agent becomes an **orchestrator** that calls worker sub-graphs as tools.
+
+Unblocked frontier-discussion tickets (all yours, all "decide the shape first, don't let me
+pre-ticket"): **B1.5.1** (saver call) · **B2.0** (assembly shape) · **C1.0** (worker-as-tool). B3.0
+waits on B2.0. Feeds B2: durable pruning of `messages` must cut on clean turn boundaries (Anthropic
+tool_use/tool_result pairing) and use `RemoveMessage`/`REMOVE_ALL_MESSAGES` — but journal's
+call-time trimming sidesteps that entirely, which is the strong argument for starting B2 ephemeral.
