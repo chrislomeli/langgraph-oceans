@@ -123,30 +123,38 @@ the saver to Postgres for durability.
   questions; turn 2 references turn 1 (e.g. "what did I just ask?").
   **Done when:** the terminal shows memory carrying across two turns.
 
-### B1.5 — durable checkpointer (Postgres) — follow-on to B1
+### B1.5 — durable checkpointer (Postgres) — ✅ DONE 2026-07-06
 
 Harvest `journal_agent/stores/checkpointer.py` — it already runs `AsyncPostgresSaver` with a
 lifecycle-managed pool. NOT the reflection code.
 
-- **B1.5.1 — Decide: stay on MemorySaver, or move to Postgres.** `[YOU · tier-3 · dep: B1.4]`
-  MemorySaver dies on restart. `AsyncPostgresSaver` persists but adds an async pool + teardown.
-  *Recommend:* move when a conversation must outlive a process bounce — a product call, not a
-  mechanism one (the swap is one line; the API is identical).
-  **Done when:** decision recorded here.
+- **B1.5.1 — Decide: stay on MemorySaver, or move to Postgres.** `[YOU · tier-3 · dep: B1.4]` ✅
+  **DECIDED: move to `AsyncPostgresSaver`.** MemorySaver dies on restart; a conversation should
+  outlive a process bounce. The swap is essentially one line at the composition root and the
+  saver API is identical, so there's little cost to taking durability now.
+  **Done when:** decision recorded here. ✅
 
-- **B1.5.2 — Wire AsyncPostgresSaver.** `[ME · tier-1 · dep: B1.5.1]`
-  `build_context` yields the saver from an async CM (`from_conn_string(url)` + `.setup()`), torn
-  down at shutdown (server lifespan after `yield`; `debug_driver` main). Reuse the existing pg
-  (`stores/postgres`). `thread_id` unchanged.
-  **Done when:** the compiled graph carries a Postgres checkpointer; tables auto-create.
+- **B1.5.2 — Wire AsyncPostgresSaver.** `[ME · tier-1 · dep: B1.5.1]` ✅
+  `build_context` is now an `@asynccontextmanager` that yields the saver from a nested async CM
+  (`stores/checkpointer.make_postgres_checkpointer` → `from_conn_string(url)` + `.setup()`), torn
+  down at block exit. BOTH entry points hold it open correctly: `debug_driver.main` and the server
+  `lifespan` (`ocean_runner.py`) each wrap it in `async with build_context() as service:` so the
+  pool closes at shutdown. `thread_id` unchanged (= `session_id`).
+  **DEVIATION from the original ticket:** it does NOT "reuse the existing pg (`stores/postgres`)".
+  The checkpointer opens its OWN async pool — correctly, because LangGraph's async saver needs
+  async psycopg while `PgGateway` is sync. Two pools by design, not oversight.
+  **Done when:** the compiled graph carries a Postgres checkpointer; tables auto-create. ✅
 
-- **B1.5.3 — Keep OceanState thin (serde guard).** `[YOU · tier-2 · dep: B1.5.2]`
+- **B1.5.3 — Keep OceanState thin (serde guard).** `[YOU · tier-2 · dep: B1.5.2]` ✅
   Journal had to pre-register ~15 domain types (`_ALLOWED_MSGPACK_MODULES`) or the checkpointer
   dropped nested Pydantic on roundtrip. Oceans' state is `messages` + scalars → default JsonPlus
-  serde works with ZERO registration. Rule: don't put rich domain objects in `OceanState`; if you
-  must, register them like journal did. This is why thin state is a feature.
-  **Done when:** a two-turn conversation survives a full process restart (reload → turn 2 still
-  remembers turn 1).
+  serde works with ZERO registration (`_ALLOWED_MSGPACK_MODULES = []`). Rule: don't put rich domain
+  objects in `OceanState`; if you must, register them like journal did. This is why thin state is a
+  feature.
+  **Done when:** a two-turn conversation survives a full process restart. ✅ **PROVEN 2026-07-06**
+  via a two-process test (fixed `session_id`): process A ran turn 1 (photo → id 556) and exited;
+  process B (fresh) ran turn 2 and recalled "556" + the exact core range with **zero tool calls** —
+  only possible if Postgres persisted turn 1 across the restart. MemorySaver would have returned empty.
 
 ### B2 — context assembly (rework journal's `ContextBuilder`, made generic)
 
@@ -164,6 +172,56 @@ what produces the "spec" here.
   (inside `make_agent_node`? a pre-model hook?), and what supplies the per-turn spec absent a
   classifier node. Keep the ContextBuilder token-budget machinery; strip its journal-specific inputs.
   **Done when:** the shape is written into THIS section (a short B2 subsection); THEN we ticket the build.
+
+  ---
+  **B2.0 — design-space notes (captured 2026-07-06; decisions still OPEN — work through tomorrow).**
+  Context: `src/core/context_builder.py` was brought over from journal_agent and is half-annotated;
+  it's fighting us because journal was single-shot and oceans is a ReAct loop. The framing below is
+  the pre-work; the 5 decisions at the bottom are what's actually mine to make.
+
+  - **THE REFRAME (changes everything):** journal's `ContextBuilder` runs ONCE per turn (classifier →
+    spec → assemble `[system, recent, session]` → one LLM call). Oceans is a **ReAct loop**: the agent
+    node calls the LLM repeatedly within ONE turn, and `messages` GROWS mid-turn (each tool call appends
+    `tool_use` + `tool_result`). So (a) context assembly runs before EVERY LLM call, inside
+    `make_agent_node` — not once at the top of the turn; (b) fat tool outputs (e.g. `vessel_traffic`'s
+    huge JSON) are the main budget threat, not old conversation. Journal's recent-vs-session vocabulary
+    answers a question we don't have.
+
+  - **Tokens — measure before AND after, different jobs:** estimate BEFORE each call (cheap chars/4
+    heuristic) to DECIDE trimming; read ACTUAL counts AFTER from `usage` metadata (`core/llm/
+    token_callback.py`) to observe/calibrate. GOTCHA: `tiktoken` is OpenAI's tokenizer — it doesn't know
+    Claude model names, so the tiktoken branch in the brought-over file silently falls to the estimate
+    every time (dead weight). Real Claude counts = Anthropic `count_tokens` API, else own the heuristic.
+
+  - **Kill the hardcoding via "sections with a policy" (generalizes my two-types instinct):** a context
+    section = `{ content, priority, policy, pinned? }`. `policy` = how it shrinks (`drop-oldest` |
+    `truncate` | `keep-first+last` | `summarize`). "tool data" vs "messages" aren't the taxonomy — they're
+    two section INSTANCES wanting different policies (fat tool result → `truncate`; old turns →
+    `drop-oldest`). Journal hardcodes 3 sections + 1 policy; the seam is: sections are data, policies pluggable.
+
+  - **Maturity ladder + where the over-engineering line is FOR THIS PROJECT:**
+    L0 do nothing (let it grow into Opus 200k) · L1 sliding window (last N, clean tool pairs) ·
+    **L2 = section budget + priority + per-section policy, computed at call time ← our honest target** ·
+    L3 summarization/compaction (Claude Code `/compact`, LangGraph `SummarizationNode`) ·
+    L4 semantic/retrieval memory across sessions (Letta/MemGPT, Zep). L3 is where over-engineering starts
+    for now — but design the L2 seam so `summarize` is just an unimplemented `policy` value. L4 waits on B3.
+
+  - **THE LANDMINE (also simplifies the design):** in a ReAct loop you CANNOT pop from the end of persisted
+    `messages` — you'll orphan a `tool_use` from its `tool_result` → Anthropic 400. Escape hatch (doc fact
+    *a*): trim at CALL TIME, never mutate persisted state. So make the builder a PURE FUNCTION:
+    `persisted OceanState → message list for THIS call` (no write-back). Checkpointer keeps full history
+    durable; pruning is ephemeral/per-call. Kills the orphaned-pair bug class AND is the reusable pattern.
+    Durable compaction (`RemoveMessage`) is an L3 concern to defer.
+
+  - **THE 5 OPEN DECISIONS (mine; Claude to rail + push back tomorrow):**
+    1. Ephemeral vs durable pruning. *(Claude recommends ephemeral/call-time, strongly — the landmine.)*
+    2. Adopt "sections with a policy"? v1 policy set? *(Claude: `truncate` tool results + `drop-oldest` turns
+       is enough to be interesting.)*
+    3. Where it runs — inside `make_agent_node` before `llm.invoke`, as a pre-model hook. Confirm.
+    4. What supplies the "spec" — no classifier node here. v1 = static config (budget + per-section policy);
+       `/skill`-selected spec is the B3 upgrade. *(Claude: yes, don't build the classifier.)*
+    5. Real budget number for Opus — NOT the inherited `max_tokens=8000` (journal-era small-model ceiling).
+    Decision #1 comes first; everything hangs off it.
 
 - **B2.1+ — TBD after B2.0.** Ticketed once the shape is decided, Arc-A style.
 
@@ -217,24 +275,25 @@ the way: `bind_tools` (dropped when the LLM moved to the registry) and `temperat
 deprecated@opus-4-8 (registry's hardcoded `temperature=0` — now config-driven via
 `LLMModel.temperature`, opus-4-8 sets `None`). X2 (commit the restructure) is done.
 
-**B1 (checkpointer) is DONE + verified (2026-07-06).** MemorySaver (B1.1); `build_context`
-builds it → `build_sandbox_graph(deps, saver)` compiles with `checkpointer=` (B1.2);
-`ocean_runner` passes `thread_id=session_id` (B1.3); B1.4 proven live in
-`debug_driver.conversation_loop` — two questions on one `session_id`, turn 2 recalled "556" +
-its core range with zero tool calls (rehydrated from turn 1).
+**B1 + B1.5 (checkpointer, now DURABLE) DONE + verified (2026-07-06).** `build_context`
+builds the saver → `build_sandbox_graph(deps, saver)` compiles with `checkpointer=` (B1.2);
+`ocean_runner`/`ask` passes `thread_id=session_id` (B1.3). B1.4 proven live (two turns, one
+process, turn 2 recalled "556" with zero tool calls). B1.5 upgraded MemorySaver →
+`AsyncPostgresSaver` (async CM, own pool, teardown on shutdown in BOTH entry points) and proved
+DURABILITY across a real process restart (two-process test: process B recalled turn 1 from
+Postgres after process A exited). Server `lifespan` bug fixed along the way — it was assigning the
+un-entered context manager to `runner.service`; now `async with build_context() as service:`.
 
 Looking forward (added 2026-07-06 from the journal_agent infra comparison — harvest journal's
 plumbing, NOT its reflection/summarization domain code):
 
-- **B1.5** — durable **Postgres checkpointer** (upgrade from MemorySaver). Mostly mine; your call on
-  when + the thin-state serde guard.
+- ~~**B1.5** — durable **Postgres checkpointer**~~ ✅ DONE 2026-07-06 (see B1.5 section).
 - **B2** — rework journal's **`ContextBuilder`** into a generic context assembler (budget + priority
   prune). Your design frontier (B2.0), inline in this doc — no separate note.
 - **B3** — **`/skills`** context commands: the menu of named context bundles (the front end to B2).
 - **Arc C** — the agent becomes an **orchestrator** that calls worker sub-graphs as tools.
 
 Unblocked frontier-discussion tickets (all yours, all "decide the shape first, don't let me
-pre-ticket"): **B1.5.1** (saver call) · **B2.0** (assembly shape) · **C1.0** (worker-as-tool). B3.0
-waits on B2.0. Feeds B2: durable pruning of `messages` must cut on clean turn boundaries (Anthropic
+pre-ticket"): **B2.0** (assembly shape) · **C1.0** (worker-as-tool). B3.0 waits on B2.0. Feeds B2: durable pruning of `messages` must cut on clean turn boundaries (Anthropic
 tool_use/tool_result pairing) and use `RemoveMessage`/`REMOVE_ALL_MESSAGES` — but journal's
 call-time trimming sidesteps that entirely, which is the strong argument for starting B2 ephemeral.

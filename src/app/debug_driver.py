@@ -42,8 +42,8 @@ async def conversation_loop(service: ConversationService, session_id: str):
 async def main() -> None:
     # Same ConversationService the server builds — here we build it directly and call
     # service.ask ourselves (no OceanRunner adapter, no HTTP).
-    service = build_context()
-    await conversation_loop(service, session_id=str(uuid4()))
+    async with build_context() as service:
+        await conversation_loop(service, session_id=str(uuid4()))
 
 
 if __name__ == "__main__":

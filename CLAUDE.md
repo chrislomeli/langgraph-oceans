@@ -5,10 +5,16 @@
 
 ## What we're doing right now
 
-- **Arc A (the injection spine) is DONE and verified end-to-end** (2026-07-06). The
-  `GRAPH = build_graph()` global is gone; everything the runner needs arrives via a context
-  object built once at startup. **NEXT: Arc B / B1 — the checkpointer** (multi-turn memory).
-  The saver choice (B1.1) is a live discussion, not yet decided.
+- **Arc A (injection spine) + Arc B / B1 + B1.5 are DONE and verified** (2026-07-06). The
+  `GRAPH = build_graph()` global is gone; context arrives via `build_context()` built at startup.
+  Multi-turn memory works via a DURABLE `AsyncPostgresSaver` checkpointer — proven across a real
+  process restart AND over the live HTTP server.
+- **NEXT (tomorrow): B2.0 — context assembly, the design frontier.** We talked through the
+  design space and captured it inline in `docs/design/work-breakdown.md` → the "B2.0 — design-space
+  notes" block. Decisions are still OPEN; start there. The gist: journal's `ContextBuilder`
+  (`src/core/context_builder.py`) was single-shot, oceans is a ReAct loop → assemble before EVERY
+  LLM call, prune at CALL TIME (pure function, no write-back), target "Level 2" (sections + policy +
+  budget). First call to make is #1: ephemeral vs durable pruning (Claude recommends ephemeral).
 - The two entry points live in the **`src/app/`** shell:
   - `src/app/ocean_runner.py` — the streaming backend: the ONE seam between the LangGraph
     graph and the `agent_chat` chat UI. Holds `ocean_runner(request, ctx)` + the `OceanRunner`
@@ -39,11 +45,17 @@ debug_driver.main()
 ## How to run
 
 ```bash
-# direct, breakpoint-friendly (needs AI_ENV_FILE exported → the SECRETS/.env)
+# AI_ENV_FILE = ABSOLUTE path to the secrets .env (lives OUTSIDE the repo). Export it
+# once; both entry points inherit it. Do NOT pass `AI_ENV_FILE=.env` inline — that
+# relative override points at a repo file that doesn't exist and the API key resolves
+# to None.
+export AI_ENV_FILE=/Users/chrislomeli/Source/SECRETS/.env
+
+# direct, breakpoint-friendly
 uv run python -m app.debug_driver
 
 # full streaming server + React front end
-AI_ENV_FILE=.env uv run uvicorn app.ocean_runner:app --reload --app-dir src
+uv run uvicorn app.ocean_runner:app --reload --app-dir src
 ```
 
 ## Map of the code — three tiers (restructured 2026-07-03, committed 2026-07-06)

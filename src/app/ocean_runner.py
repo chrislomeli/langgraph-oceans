@@ -9,7 +9,10 @@ FastAPI here is PURE TRANSPORT. All conversation logic lives in ConversationServ
 The same ConversationService is called directly (no HTTP) by app/debug_driver.py —
 that's the whole point of keeping this layer logic-free.
 
-    AI_ENV_FILE=.env uv run uvicorn app.ocean_runner:app --reload --app-dir src
+    # AI_ENV_FILE must point at the absolute path of the secrets .env (kept OUTSIDE the
+    # repo). Export it once in your shell, then just run — don't override it inline:
+    #   export AI_ENV_FILE=/path/to/SECRETS/.env
+    uv run uvicorn app.ocean_runner:app --reload --app-dir src
 """
 from __future__ import annotations
 
@@ -61,12 +64,15 @@ runner = OceanRunner()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Process-lifecycle STARTUP: build the service ONCE, bind it to the shared runner.
+    """Process-lifecycle STARTUP→SHUTDOWN: build the service ONCE, bind it to the runner.
 
-    Teardown (after `yield`) — closing pools when B1.5 lands a Postgres saver — goes here.
+    build_context() is an async CM: entering it opens the Postgres checkpointer pool and
+    yields the service; exiting it (after our `yield`, at server shutdown) tears the pool
+    down. We hold it open for the whole server lifetime by nesting our `yield` inside it.
     """
-    runner.service = build_context()
-    yield
+    async with build_context() as service:
+        runner.service = service
+        yield
 
 
 app = create_chat_app(runner=runner, lifespan=lifespan, title="Ocean Conservation Agent")

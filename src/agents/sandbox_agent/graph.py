@@ -20,7 +20,6 @@ from typing import Annotated, Optional
 
 from langchain_core.messages import AnyMessage, SystemMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -98,7 +97,7 @@ if __name__ == '__main__':
         data_store=data_store,
     )
 
-    # saver is irrelevant to draw_ascii (structure only), but the arg is required —
-    # a throwaway MemorySaver keeps this self-test runnable.
+    # saver is irrelevant to draw_ascii (structure only), so omit it — the arg is
+    # optional and defaults to None.
     graph = build_sandbox_graph(agent_dependencies)
     print(graph.get_graph().draw_ascii())

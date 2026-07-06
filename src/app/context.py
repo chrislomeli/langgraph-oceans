@@ -17,40 +17,44 @@ Both entry points build the same way:
 """
 from __future__ import annotations
 
-from langgraph.checkpoint.memory import MemorySaver
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from app.conversation_service import ConversationService
 from core.agents.dependencies import AgentDependencies
 from core.config import get_settings
 from core.llm.llm_registry import build_llm_registry, LLMLabel
 from core.prompts import PromptRegistry
+from stores.checkpointer import make_postgres_checkpointer
 from stores.postgres import get_pg_gateway
 
 
-def build_context() -> ConversationService:
+@asynccontextmanager
+async def build_context() -> AsyncIterator[ConversationService]:
     """Assemble the process-scoped ConversationService. Runs once, at startup."""
     # settings + LangSmith tracing
     settings = get_settings()
     settings.apply_langsmith()
 
     # capabilities bag (framework/infrastructure — the ingredients the service consumes)
-    data_store = get_pg_gateway()
+    postgres_gateway = get_pg_gateway()
     llm_registry = build_llm_registry(
-        settings=settings,     # deployment config (keys, env)
-        role_config={          # the roles THIS app wants, and the model behind each
+        settings=settings,  # deployment config (keys, env)
+        role_config={  # the roles THIS app wants, and the model behind each
             "oceans_agent": LLMLabel.OPUS,
-        })                     # model_catalog defaults to the registry's own `models`
+        })  # model_catalog defaults to the registry's own `models`
     prompt_registry = PromptRegistry()
     caps = AgentDependencies(
         prompt_registry=prompt_registry,
         llm_registry=llm_registry,
-        data_store=data_store,
+        data_store=postgres_gateway,
     )
 
-    # process-scoped checkpointer. B1: MemorySaver (in-proc). B1.5 swaps in
-    # AsyncPostgresSaver + a shutdown teardown story. The service builds its graph
-    # from caps + saver.
-    saver = MemorySaver()
+    # process-scoped checkpointer (AsyncPostgresSaver). Its `async with` holds the
+    # connection pool open for the life of this block, so the pool is torn down only
+    # when the caller's `async with build_context()` exits. The service builds its
+    # graph from caps + saver.
+    async with make_postgres_checkpointer(settings.postgres_url, setup=True) as saver:
+        yield ConversationService(caps, saver=saver)
 
-    # the application surface — the one object the process shares across all requests
-    return ConversationService(caps, saver=saver)
+
