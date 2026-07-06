@@ -16,9 +16,11 @@ TIER SPLIT (memory: agentic-division-of-labor)
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Optional
 
 from langchain_core.messages import AnyMessage, SystemMessage
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -42,34 +44,35 @@ class OceanState(TracedState):
     and adds the ReAct message channel with the `add_messages` reducer (the same
     appending behavior LangGraph's MessagesState gives, now on a pydantic base).
     """
-    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list) # noqa
+    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)  # noqa
 
 
 def make_agent_node(tools: list, deps: AgentDependencies):
     role = "oceans_agent"
-    system_prompt =  deps.prompt_registry.render(role, {})
+    system_prompt = deps.prompt_registry.render(role, {})
     llm_base = deps.llm_registry.get(role)
     llm = llm_base.bind_tools(tools)
-
 
     @node_executor("agent_node")
     def agent_node(state: OceanState) -> dict:
         messages = [SystemMessage(system_prompt)] + state.messages
         return {"messages": [llm.invoke(messages)]}
+
     return agent_node
 
-def build_sandbox_graph(deps: AgentDependencies):
+
+def build_sandbox_graph(deps: AgentDependencies, saver: Optional[BaseCheckpointSaver] = None):
     """Compile the ReAct graph. Constructing the LLM is cheap (no API call until invoke)."""
 
     b = StateGraph(OceanState)  # noqa  (PyCharm can't match TypedDict to StateT bound)
-    b.add_node("agents", make_agent_node(tools=TOOLS, deps=deps))  # noqa  (PyCharm can't match TypedDict to StateT bound)
-    b.add_node("tools", ToolNode(TOOLS)) # all tools as a default
+    b.add_node("agents",
+               make_agent_node(tools=TOOLS, deps=deps))  # noqa  (PyCharm can't match TypedDict to StateT bound)
+    b.add_node("tools", ToolNode(TOOLS))  # all tools as a default
 
     b.add_edge(START, "agents")
     b.add_conditional_edges("agents", tools_condition)  # → tools if tool_calls else END
     b.add_edge("tools", "agents")
-    return b.compile()
-
+    return b.compile(saver)
 
 
 if __name__ == '__main__':
@@ -80,10 +83,10 @@ if __name__ == '__main__':
 
     # set up the models we'll be using
     llm_registry = build_llm_registry(
-        settings=settings,     # deployment config (keys, env)
-        role_config={          # the roles THIS app wants, and the model behind each
+        settings=settings,  # deployment config (keys, env)
+        role_config={  # the roles THIS app wants, and the model behind each
             "oceans_agent": LLMLabel.OPUS,
-        })                     # model_catalog defaults to the registry's own `models`
+        })  # model_catalog defaults to the registry's own `models`
 
     # point to prompt registry
     prompt_registry = PromptRegistry()
@@ -95,9 +98,7 @@ if __name__ == '__main__':
         data_store=data_store,
     )
 
+    # saver is irrelevant to draw_ascii (structure only), but the arg is required —
+    # a throwaway MemorySaver keeps this self-test runnable.
     graph = build_sandbox_graph(agent_dependencies)
     print(graph.get_graph().draw_ascii())
-
-
-
-
