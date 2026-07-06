@@ -13,8 +13,8 @@ raw *ingredients* (llm_registry, prompt_registry, store) the builder consumes �
 Option-1 decision: don't add a field until something reads it.
 
 Both entry points build this the same way:
-  - server  (chat_app):   lifespan builds ctx at startup, a closure hands it to ocean_runner
-  - debug   (debug_runner): main() calls build_context() directly — no server
+  - server  (ocean_runner): lifespan builds ctx at startup, a closure hands it to ocean_runner
+  - debug   (debug_driver):  main() calls build_context() directly — no server
 """
 from __future__ import annotations
 
@@ -54,12 +54,9 @@ class AppContext:
 
 def build_context() -> AppContext:
     """Assemble the process-scoped context. Runs once, at startup — never at import."""
-    #  load settings, and apply LangSmith tracing (as chat_app does today)
+    #  load settings, and apply LangSmith tracing (as ocean_runner does today)
     settings = get_settings()
     settings.apply_langsmith()
-
-    #   2. build the graph the CURRENT (argless) way — leave _llm alone until A1
-    graph = build_sandbox_graph()
 
     # initialize the postgres datastore
     data_store = get_pg_gateway()
@@ -68,7 +65,7 @@ def build_context() -> AppContext:
     llm_registry = build_llm_registry(
         settings=settings,     # deployment config (keys, env)
         role_config={          # the roles THIS app wants, and the model behind each
-            "ocean_agent": LLMLabel.OPUS,
+            "oceans_agent": LLMLabel.OPUS,
         })                     # model_catalog defaults to the registry's own `models`
 
     # point to prompt registry
@@ -81,6 +78,9 @@ def build_context() -> AppContext:
         llm_registry=llm_registry,
         data_store=data_store,
     )
+
+    #   2. build the graph the CURRENT (argless) way — leave _llm alone until A1
+    graph = build_sandbox_graph(agent_dependencies)
 
     #  create the application context
     ctx = AppContext(settings=settings, graph=graph, deps=agent_dependencies)

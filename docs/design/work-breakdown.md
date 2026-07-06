@@ -143,6 +143,13 @@ Verdict: the registry (`core/llm/llm_registry.py`) is already seasoned-grade. **
 
 ## Start here
 
-Top unblocked tickets: **A0.1** (you decide the context shape) → **A0.2** (you write
-`build_context`, your DI rep). A0.3–A0.5 are mine and queue behind them. In parallel, **A2.0**
-(I read `core/prompts`) is unblocked and unblocks A2.
+**Arc A is DONE and verified end-to-end (2026-07-06).** `build_context() → AppContext(settings,
+graph, deps)`; LLM registry (A1) + prompt registry (A2) wired and consumed; `debug_driver` runs
+the full F5 chain, every node `status: ok`. Two restructure regressions were caught + fixed on
+the way: `bind_tools` (dropped when the LLM moved to the registry) and `temperature`
+deprecated@opus-4-8 (registry's hardcoded `temperature=0` — now config-driven via
+`LLMModel.temperature`, opus-4-8 sets `None`). X2 (commit the restructure) is done.
+
+Top unblocked ticket: **B1.1** — you decide the checkpointer saver (under discussion, not yet
+decided). Then B1.2–B1.4 (attach saver → thread `thread_id` → multi-turn verify) → B2.0 (the
+context-assembly design note, your frontier).

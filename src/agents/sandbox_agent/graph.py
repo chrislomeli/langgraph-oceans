@@ -9,7 +9,6 @@ and when to stop — no scripted chain. Design: docs/design/agents-graph-design.
 ═══════════════════════════════════════════════════════════════════════════════════
 TIER SPLIT (memory: agentic-division-of-labor)
   • Claude scaffolded the wiring below (state, model+tools binding, the ReAct loop).
-  • TODO(you) tier 2: write SYSTEM_PROMPT — the agents's BRAIN. Plus the tool ads in
     agents/tools.py. Those two are where the agents's behavior lives; everything else is
     plumbing you can read once.
 ═══════════════════════════════════════════════════════════════════════════════════
@@ -19,18 +18,20 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from langchain_anthropic import ChatAnthropic
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AnyMessage, SystemMessage
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from pydantic import Field
 
-from core.agents import node_executor
-from core.agents.node_types import TracedState
 from agents.tools import TOOLS
+from core.agents import node_executor
+from core.agents.dependencies import AgentDependencies
+from core.agents.node_types import TracedState
 from core.config import get_settings
+from core.llm.llm_registry import build_llm_registry, LLMLabel
+from core.prompts import PromptRegistry
+from stores.postgres import get_pg_gateway
 
 
 class OceanState(TracedState):
@@ -41,88 +42,62 @@ class OceanState(TracedState):
     and adds the ReAct message channel with the `add_messages` reducer (the same
     appending behavior LangGraph's MessagesState gives, now on a pydantic base).
     """
-
-    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
-
-
-# DECIDE (tier 3): claude-opus-4-8 = strongest reasoning for decomposition;
-# claude-sonnet-4-6 = cheaper/faster if the loop iterates a lot. One-line swap.
-MODEL = "claude-opus-4-8"
+    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list) # noqa
 
 
-# Starter written by Claude 2026-06-21 (per agentic-division-of-labor: starters to
-# learn from + tune against real traces). Tune this against what the agents actually does.
-SYSTEM_PROMPT = """You are a marine-mammal CONSERVATION-RISK assistant. You reason about an \
-individual whale's identity, where it ranges, the conditions of its habitat, and its exposure \
-to ship strikes — and you say so plainly when a question falls outside that lane.
+def make_agent_node(tools: list, deps: AgentDependencies):
+    role = "oceans_agent"
+    system_prompt =  deps.prompt_registry.render(role, {})
+    llm_base = deps.llm_registry.get(role)
+    llm = llm_base.bind_tools(tools)
 
-WHAT YOU COVER: identity (who is this whale), location/range (where it's been seen), habitat \
-conditions (depth, temperature, sanctuary), and ship-strike exposure (vessel traffic over its \
-range, protected zones).
-WHAT YOU DON'T: health, age, family, individual behavior, or real-time positions. For those, \
-say "that's not in my sources" rather than guessing.
-
-HOW TO ANSWER:
-- Anchor on the individual, then gather what you need by CHAINING tools — most real answers are \
-a chain, not one lookup. A typical ship-risk question goes: identify the whale (photo_id) -> \
-find its range (sighting_lookup) -> measure ship traffic over that range (vessel_traffic), \
-enriching with habitat conditions (sighting_context) where it sharpens the picture.
-- Thread one tool's output into the next: the individual_id from photo_id drives the sighting \
-tools; the range box from sighting_lookup drives vessel_traffic.
-- Decide for yourself which tools a question needs — not every question needs all of them.
-
-UNCERTAINTY: the photo_id NOVEL/abstain signal is a SOFT prior, not a verdict — corroborate it \
-with the match margin and sighting/location evidence before concluding a whale is new or \
-misidentified.
-
-GROUNDING: base every factual claim on what the tools returned, and attribute it (which whale, \
-which data). If the tools don't support an answer, say so."""
-
-
-def _llm():
-    """ChatAnthropic bound to the tools (so the model can emit tool calls)."""
-    s = get_settings()
-    key = s.anthropic_api_key.get_secret_value() if s.anthropic_api_key else None
-    # NB: claude-opus-4-8 deprecates `temperature` (the API rejects it); omit it.
-    return ChatAnthropic(model=MODEL, api_key=key).bind_tools(TOOLS)
-
-
-def build_sandbox_graph():
-    """Compile the ReAct graph. Constructing the LLM is cheap (no API call until invoke)."""
-    llm = _llm()
 
     @node_executor("agent_node")
     def agent_node(state: OceanState) -> dict:
-        messages = [SystemMessage(SYSTEM_PROMPT)] + state.messages
+        messages = [SystemMessage(system_prompt)] + state.messages
         return {"messages": [llm.invoke(messages)]}
+    return agent_node
 
+def build_sandbox_graph(deps: AgentDependencies):
+    """Compile the ReAct graph. Constructing the LLM is cheap (no API call until invoke)."""
 
     b = StateGraph(OceanState)  # noqa  (PyCharm can't match TypedDict to StateT bound)
-    b.add_node("agents", agent_node)  # noqa  (PyCharm can't match TypedDict to StateT bound)
-    b.add_node("tools", ToolNode(TOOLS))
+    b.add_node("agents", make_agent_node(tools=TOOLS, deps=deps))  # noqa  (PyCharm can't match TypedDict to StateT bound)
+    b.add_node("tools", ToolNode(TOOLS)) # all tools as a default
+
     b.add_edge(START, "agents")
     b.add_conditional_edges("agents", tools_condition)  # → tools if tool_calls else END
     b.add_edge("tools", "agents")
     return b.compile()
 
 
-def run_agent(question: str, image_path: str | None = None) -> list:
-    """One question (+ optional photo path) → the full message list (answer + trace).
 
-    The agents does NOT see the image — it gets the path as text and hands it to the
-    photo_id tool, which does the embedding. Returns every message (the decision trace);
-    the final message is the answer.
-    """
-    content = question if not image_path else f"{question}\n\n[query photo at: {image_path}]"
-    graph = build_sandbox_graph()
-    result = graph.invoke({"messages": [HumanMessage(content)]})  # noqa  (PyCharm can't match TypedDict to StateT bound) 
-    return result["messages"]
+if __name__ == '__main__':
+    settings = get_settings()
+
+    # initialize the postgres datastore
+    data_store = get_pg_gateway()
+
+    # set up the models we'll be using
+    llm_registry = build_llm_registry(
+        settings=settings,     # deployment config (keys, env)
+        role_config={          # the roles THIS app wants, and the model behind each
+            "oceans_agent": LLMLabel.OPUS,
+        })                     # model_catalog defaults to the registry's own `models`
+
+    # point to prompt registry
+    prompt_registry = PromptRegistry()
+
+    # create the composite dependencies that we'll inject to graphs
+    agent_dependencies = AgentDependencies(
+        prompt_registry=prompt_registry,
+        llm_registry=llm_registry,
+        data_store=data_store,
+    )
+
+    graph = build_sandbox_graph(agent_dependencies)
+    print(graph.get_graph().draw_ascii())
 
 
-if __name__ == "__main__":
-    # Smoke: compile the graph and show its structure. No LLM call (no cost).
-    # Run: uv run python -m agents.graph
-    g = build_sandbox_graph()
-    print("compiled OK. nodes:", list(g.get_graph().nodes))
-    print("tools bound:", [t.name for t in TOOLS])
-    print("\nSYSTEM_PROMPT is a stub:", SYSTEM_PROMPT.startswith("STUB"))
+
+

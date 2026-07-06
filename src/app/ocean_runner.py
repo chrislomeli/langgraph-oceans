@@ -1,4 +1,4 @@
-"""chat_app.py — wire the sandbox_agent graph into the agent_chat streaming backend.
+"""ocean_runner.py — wire the sandbox_agent graph into the agent_chat streaming backend.
 
 This is the ONE seam between your LangGraph graph and the chat front end. It does
 exactly what `agents/sandbox_agent/graph.py::run_agent` does, but streaming:
@@ -14,7 +14,7 @@ stop). This runner only TRANSLATES the graph's event stream into Frames the UI s
 
 Run it (from the repo root — needs src on the path and your env file for the API key):
 
-    AI_ENV_FILE=.env uv run uvicorn app.chat_app:app --reload --app-dir src
+    AI_ENV_FILE=.env uv run uvicorn app.ocean_runner:app --reload --app-dir src
 
 Then point the existing React front end (examples/react-journal in the agent_chat
 repo) at http://localhost:8000, send a question, and watch tokens stream.
@@ -59,7 +59,7 @@ async def ocean_runner(request: TurnRequest, ctx: AppContext) -> AsyncIterator:
     the graph and never surfaces here.
     """
     # Seed session_id into the graph state (OceanState inherits it from TracedState):
-    # node_executor stamps it on every me       tric/error record, so a turn is traceable by
+    # node_executor stamps it on every metric/error record, so a turn is traceable by
     # request. Same id will key the checkpointer's thread_id when multi-turn lands.
     graph = ctx.graph
     # noqa on the input: OceanState is a pydantic model, so PyCharm rejects the plain
@@ -102,7 +102,7 @@ class OceanRunner:
     per-turn state — that belongs in the graph/checkpointer, keyed by session_id.
 
     ctx is filled at startup, not import. The server's lifespan sets it after
-    `build_context()`; `debug_runner` passes it straight to the constructor.
+    `build_context()`; `debug_driver` passes it straight to the constructor.
     """
 
     def __init__(self, ctx: AppContext | None = None) -> None:
@@ -112,7 +112,7 @@ class OceanRunner:
         if self.ctx is None:
             raise RuntimeError(
                 "OceanRunner has no AppContext — build_context() must run first "
-                "(the server does this in its lifespan; debug_runner passes it in)."
+                "(the server does this in its lifespan; debug_driver passes it in)."
             )
         return ocean_runner(request, self.ctx)
 

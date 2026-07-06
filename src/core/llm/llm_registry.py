@@ -86,6 +86,10 @@ class LLMModel:
     # pricing is regional/variable (Bedrock) or free (Ollama).
     price_per_1m_input: float | None = None
     price_per_1m_output: float | None = None
+    # Sampling temperature. Default 0 (deterministic) for the classic chat
+    # models. Set None for models that DEPRECATE the param and 400 if it's sent
+    # (e.g. claude-opus-4-8) — the builder omits the kwarg entirely when None.
+    temperature: float | None = 0
 
 
 # ── Available model definitions ───────────────────────────────────────────────
@@ -111,9 +115,10 @@ models: dict[LLMLabel, LLMModel | None] = {
     LLMLabel.OPUS: LLMModel(
         key_label="anthropic_api_key",
         provider=LLMProvider.ANTHROPIC,
-        model="claude-opus-4-7",
+        model="claude-opus-4-8",
         price_per_1m_input=15.00,
         price_per_1m_output=75.00,
+        temperature=None,  # opus-4-8 deprecates `temperature` — sending it 400s
     ),
     # OpenAI — prices are public list rates as of 2026-05 (per million tokens)
     LLMLabel.GPT_MINI: LLMModel(
@@ -319,24 +324,29 @@ def _build_chat_model(
     how that provider authenticates.
     """
     callbacks = [callback] if callback is not None else []
+    # Omit `temperature` when the catalog entry sets it None — some newer models
+    # (claude-opus-4-8) deprecate it and 400 if it's sent at all.
+    temp: dict[str, Any] = (
+        {"temperature": model_cfg.temperature} if model_cfg.temperature is not None else {}
+    )
 
     if model_cfg.provider == LLMProvider.OPENAI:
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            model=model_cfg.model, temperature=0, callbacks=callbacks, **provider_kwargs
+            model=model_cfg.model, callbacks=callbacks, **temp, **provider_kwargs
         )
     elif model_cfg.provider == LLMProvider.ANTHROPIC:
         from langchain_anthropic import ChatAnthropic
 
         return ChatAnthropic(
-            model_name=model_cfg.model, temperature=0, callbacks=callbacks, **provider_kwargs
+            model_name=model_cfg.model, callbacks=callbacks, **temp, **provider_kwargs
         )
     elif model_cfg.provider == LLMProvider.OLLAMA:
         from langchain_ollama import ChatOllama
 
         return ChatOllama(
-            model=model_cfg.model, temperature=0, callbacks=callbacks, **provider_kwargs
+            model=model_cfg.model, callbacks=callbacks, **temp, **provider_kwargs
         )
     elif model_cfg.provider == LLMProvider.BEDROCK:
         try:
@@ -348,7 +358,7 @@ def _build_chat_model(
             ) from exc
 
         return ChatBedrockConverse(
-            model=model_cfg.model, temperature=0, callbacks=callbacks, **provider_kwargs
+            model=model_cfg.model, callbacks=callbacks, **temp, **provider_kwargs
         )
     raise ValueError(f"Unknown provider: {model_cfg.provider}")
 
