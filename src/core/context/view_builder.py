@@ -47,15 +47,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
+from core.context.chunking import index_after_bookmark
 from core.context.manifest import build_tool_manifest
 from core.context.state import SummaryChunk
 
 
 def build_view(
     messages: Sequence[BaseMessage],
-    summary_chunks: Sequence[SummaryChunk],
+    summary_messages: Sequence[HumanMessage],
     last_processed_message_id: str | None,
     live_tail_size: int,
     compaction_size_chars: int,
@@ -84,7 +85,15 @@ def build_view(
     Returns the message list. With no chunks and a short tail, this is the raw
     messages unchanged.
     """
-    raise NotImplementedError
+    # ---- MVP (pure prose): tool handling deferred ----
+    # No tools yet, so the tail is just the raw messages after the bookmark, and
+    # summaries are already framed HumanMessages sitting where the summarized prefix
+    # was — the view is simply [summaries] + [raw tail]. When tools land this gains
+    # the leading manifest block and _structural_tail (drop aged tool pairs); for now
+    # live_tail_size / compaction_size_chars are unused.
+    start = index_after_bookmark(messages, last_processed_message_id)
+    tail = messages[start:]
+    return [*summary_messages, *tail]
 
 
 def _structural_tail(
@@ -111,16 +120,16 @@ def _structural_tail(
     """
     raise NotImplementedError
 
-
-def _render_summaries(summary_chunks: Sequence[SummaryChunk]) -> list[BaseMessage]:
-    """Render each COLD chunk as a normal-salience framed message, oldest first — to
-    sit IN PLACE where its source turns were, NOT concatenated into a system block.
-
-    Returns list[BaseMessage] (note: NOT a str anymore — that was the old hoisted-
-    to-system design). One framed message per chunk, e.g.
-    HumanMessage(f"[Summary of earlier turns: {chunk.summary_text}]"), so the summary
-    reads as history at its position. Consecutive same-role framed summaries are fine
-    (providers merge them). Kept per-chunk so a chunk can later be 'expanded' back to
-    source via its message_ids without touching this rendering.
-    """
-    raise NotImplementedError
+#
+# def _render_summaries(summary_chunks: Sequence[SummaryChunk]) -> list[BaseMessage]:
+#     """Render each COLD chunk as a normal-salience framed message, oldest first — to
+#     sit IN PLACE where its source turns were, NOT concatenated into a system block.
+#
+#     Returns list[BaseMessage] (note: NOT a str anymore — that was the old hoisted-
+#     to-system design). One framed message per chunk, e.g.
+#     HumanMessage(f"[Summary of earlier turns: {chunk.summary_text}]"), so the summary
+#     reads as history at its position. Consecutive same-role framed summaries are fine
+#     (providers merge them). Kept per-chunk so a chunk can later be 'expanded' back to
+#     source via its message_ids without touching this rendering.
+#     """
+#     raise NotImplementedError

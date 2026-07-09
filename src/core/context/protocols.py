@@ -40,7 +40,7 @@ class Summarizer(Protocol):
     agent model. The implementation lives in the app wiring, not here.
     """
 
-    def summarize(self, messages: list[BaseMessage]) -> list[SummaryChunk]: ...
+    def summarize(self, messages: list[BaseMessage]) -> list[str]: ...
 
 
 @runtime_checkable

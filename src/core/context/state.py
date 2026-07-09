@@ -43,7 +43,6 @@ class SummaryChunk(BaseModel):
     """
 
     id: str = Field(default_factory=lambda: uuid4().hex)
-    message_ids: list[str]           # all message ids covered, in order
     summary_text: str                # rendered structured summary (summarizer.py)
                                      # not of the source messages it replaced
     created_at: str = Field(
@@ -54,15 +53,19 @@ class SummaryChunk(BaseModel):
 class ContextStateFields(BaseModel):
     """The exact field set the context module contributes to graph state.
 
-    Mirror these into OceanState (inherit as a mixin, or copy). Only two fields
-    persist — everything else the module does is recomputed at call time.
+    Mirror these into OceanState (inherit as a mixin, or copy). These persist across
+    turns — everything else the module does is recomputed at call time.
 
-      summary_chunks              durable, append-only (append_chunks reducer).
+      summary_messages            durable, framed summary HumanMessages
+                                  (add_messages reducer — upsert/RemoveMessage).
       last_processed_message_id   the bookmark; plain last-write (no reducer) —
                                   a single scalar advanced by one writer.
+      token_count                 last actual total_tokens off the agent's reply;
+                                  plain last-write, overwritten every hop.
     """
 
     # Pydantic V2 handles `= []` safely without needing a default_factory
     summary_messages: Annotated[list[HumanMessage], add_messages] = []
     last_processed_message_id: str | None = None
+    token_count: int = Field(default=0)
 

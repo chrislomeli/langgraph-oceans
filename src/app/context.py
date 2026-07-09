@@ -45,7 +45,7 @@ async def build_context() -> AsyncIterator[ConversationService]:
         settings=settings,  # deployment config (keys, env)
         role_config={  # the roles THIS app wants, and the model behind each
             "oceans_agent": LLMLabel.OPUS,
-            "context_summarizer": LLMLabel.HAIKU,
+            "summarizer": LLMLabel.HAIKU,
         })  # model_catalog defaults to the registry's own `models`
 
     prompt_registry = PromptRegistry()

@@ -12,12 +12,11 @@ from core.context.manager import ContextPolicy, ContextManager
 from core.context.manifest import build_tool_manifest
 from core.context.protocols import Summarizer, TokenCounter, ToolResultStore
 from core.context.retention import RetentionPolicy
-from core.context.state import SummaryChunk
+
 
 __all__ = [
     "ContextManager",
     "ContextPolicy",
-    "SummaryChunk",
     "RetentionPolicy",
     "build_tool_manifest",
     "TokenCounter",

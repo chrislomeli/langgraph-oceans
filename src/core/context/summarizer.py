@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage
 
@@ -59,16 +61,18 @@ def summarize_messages(
     if not prose:
         return []  # next_boundary guarantees prose; defensive no-op otherwise
 
-    summary_chunks: list[SummaryChunk] =  summarizer.summarize(prose)
+    summary_chunks: list[str] =  summarizer.summarize(prose)
 
     # transform to human messages
-    def make_summary_message(chunk: SummaryChunk) -> HumanMessage:
+    def make_summary_message(summary: str) -> HumanMessage:
         return HumanMessage(
-            content=f"[Summary of earlier conversation]:\n{chunk.summary_text}",
+            id= uuid4().hex,
+            content=f"[Summary of earlier conversation]:\n{summary}",
             additional_kwargs={
                 "kind": "summary",
-                "tokens": counter.count_text(chunk.summary_text),
-                "message_ids":  chunk.message_ids},
+                "tokens": counter.count_text(summary),
+                "created_at": datetime.now(timezone.utc).isoformat()
+            },
         )
 
     summary_messages = [make_summary_message(c) for c in summary_chunks]
@@ -84,19 +88,20 @@ class LLMSummarizer:
     """
 
     def __init__(self, model, system_prompt: str) -> None:
-        self._model = model.structured(SummaryChunk)
+        self._model = model
         self._system_prompt = system_prompt
 
-    def summarize(self, messages: list[BaseMessage]) -> list[SummaryChunk]:
+    def summarize(self, messages: list[BaseMessage]) -> list[str]:
         prompt = [
             SystemMessage(self._system_prompt),
             HumanMessage(f"Conversation to summarize:\n\n{_render_transcript(messages)}"),
         ]
 
         result = self._model.invoke(prompt)
-
-
-        return result.content if hasattr(result, "content") else str(result)
+        content = result.content if hasattr(result, "content") else str(result)
+        # One summary for now; N-way topical segmentation is a saved point (splitting
+        # one model response into many needs a delimiter/structured-output protocol).
+        return [content if isinstance(content, str) else str(content)]
 
 
 def _render_transcript(messages: Sequence[BaseMessage]) -> str:
@@ -105,5 +110,5 @@ def _render_transcript(messages: Sequence[BaseMessage]) -> str:
     Rendered to text (rather than replayed as chat turns) so the model summarizes
     the conversation instead of trying to continue it.
     """
-    prose = [dict(messase_id=m.id, type=m.type, conent=m.content) for m in messages]
+    prose = [dict(message_id=m.id, type=m.type, content=m.content) for m in messages]
     return json.dumps(prose)

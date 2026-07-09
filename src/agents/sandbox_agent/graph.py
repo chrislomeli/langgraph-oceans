@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Optional, Literal, Any
 
-from langchain_core.messages import SystemMessage, AnyMessage, ToolMessage
+from langchain_core.messages import SystemMessage, AnyMessage, ToolMessage, AIMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -37,8 +37,6 @@ from core.prompts import PromptRegistry
 from stores.postgres import get_pg_gateway
 
 
-
-
 def make_summarizer_node(deps: AgentDependencies):
     """
     Update the state's summary_chunks and last message id
@@ -49,6 +47,7 @@ def make_summarizer_node(deps: AgentDependencies):
     :return:
     """
     role = "summarizer"
+    policy = "oceans_agent"
     system_prompt = deps.prompt_registry.render(role, {})
     llm_summarizer = deps.llm_registry.get(role)
     summarizer = LLMSummarizer(llm_summarizer, system_prompt)
@@ -56,42 +55,55 @@ def make_summarizer_node(deps: AgentDependencies):
 
     @node_executor("summarizer_node")
     def summarizer_node(state: OceanState):
-        # state has summaries, messages, last_ id -- summarize and update them here before calling the agent
-        context_manager.prepare(state=state, policy_key=role, summarizer=summarizer)
+        # todo: do any tool compaction here? or in a separate node?
 
-        last_item =  state.messages[-1]
-        if isinstance(last_item, ToolMessage):
-            pass
+        # state has summaries, messages, last_ id -- summarize and update them here before calling the agent
+        return context_manager.prepare(state=state, policy_key=policy, summarizer=summarizer)
 
 
     return summarizer_node
 
 
+
 def make_agent_node(tools: list, deps: AgentDependencies):
     role = "oceans_agent"
-    llm_agent = deps.llm_registry.get(role)
+    # bind_tools so the model can emit structured tool_calls (without it the agent
+    # narrates "[Tool call: …]" as prose and tools_condition never routes to `tools`).
+    llm_agent = deps.llm_registry.get(role).bind_tools(tools)
     system_prompt = deps.prompt_registry.render(role, {})
     context = deps.context_manager
 
     @node_executor("agent_node")
     def agent_node(state: OceanState) -> dict:
-
         messages_view = context.build_view(state, "oceans_agent")
         messages = [SystemMessage(system_prompt)] + messages_view
 
-        return {"messages": [llm_agent.invoke(messages)]}
+        # call the llm and get an AI response back
+        response = llm_agent.invoke(messages)
+
+        # The reply MUST be returned so add_messages appends it to state.messages —
+        # that's what tools_condition reads next AND what the runner streams to the
+        # chat via astream_events (on_chat_model_stream). Streaming is NOT done here.
+        updates: dict = {"messages": [response]}
+
+        # latest actual token count, straight off the response
+        if response.usage_metadata:
+            updates["token_count"] = response.usage_metadata["total_tokens"]
+
+        return updates
+
+
 
     return agent_node
 
 
-def route_ai_response(state: list[AnyMessage] | dict[str, Any] | BaseModel, messages_key: str = "messages",) -> Literal["tools", "__end__"]:
+def route_ai_response(state: list[AnyMessage] | dict[str, Any] | BaseModel, messages_key: str = "messages", ) -> \
+Literal["tools", "__end__"]:
     # tools_condition routes to "tools" or "__end__"
-    next_node =  tools_condition(state,messages_key)
+    next_node = tools_condition(state, messages_key)
 
     # perform any additional work
     return next_node
-
-
 
 
 def build_sandbox_graph(deps: AgentDependencies, saver: Optional[BaseCheckpointSaver] = None):
@@ -122,6 +134,7 @@ if __name__ == '__main__':
         settings=settings,  # deployment config (keys, env)
         role_config={  # the roles THIS app wants, and the model behind each
             "oceans_agent": LLMLabel.OPUS,
+            "summarizer": LLMLabel.HAIKU,
         })  # model_catalog defaults to the registry's own `models`
 
     # point to prompt registry

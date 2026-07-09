@@ -82,6 +82,21 @@ class ContextManager:
         self.counter = counter
         self.policies = policies or dict(default=ContextPolicy())
 
+    def _policy(self, policy_key: str) -> ContextPolicy:
+        """Resolve a policy by key, or FAIL LOUD if it isn't configured.
+
+        Deliberately no fallback: a missing policy is a wiring bug (the caller passed
+        a key the composition root never wired). Defaulting to an arbitrary policy
+        would silently summarize/build-view with the wrong budget — worse than a
+        crash. Callers pass the correct key; if it's absent, say so clearly.
+        """
+        try:
+            return self.policies[policy_key]
+        except KeyError:
+            raise KeyError(
+                f"No context policy {policy_key!r}. Configured: {list(self.policies)}"
+            ) from None
+
     def prepare(
             self, state: Any, policy_key: str, summarizer: Summarizer
     ) -> dict[str, Any]:
@@ -99,9 +114,8 @@ class ContextManager:
         Idempotent under checkpoint resume: no new chunk when there isn't a budget's
         worth of un-summarized prose.
         """
-        policy = self.policies[policy_key]
+        policy = self._policy(policy_key)
         messages = state.messages
-        chunks = state.summary_chunks  # existing COLD summaries
         bookmark = state.last_processed_message_id
 
         # 1. Carve the next prose slice. next_boundary IS the gate: it returns None
@@ -114,21 +128,14 @@ class ContextManager:
             policy.live_tail_size,
         )
 
-        # 2. Nothing to summarize this turn — still build the view over the EXISTING
-        #    chunks and bookmark (so prior summaries + the manifest still apply).
+        # 2. Nothing to summarize this turn — no durable change. The agent node
+        #    builds its own view (Option B), so prepare never builds a view.
         if boundary is None:
-            view = build_view(
-                messages,
-                chunks,
-                bookmark,
-                policy.live_tail_size,
-                policy.compaction_size_chars
-            )
             return {}
 
         # 3. Summarize the slice into one or more chunks; advance the bookmark to the
         new_bookmark = boundary.end_message_id
-        new_chunks: list[HumanMessage] = summarize_messages(
+        summarized_messages: list[HumanMessage] = summarize_messages(
             messages=messages,
             boundary=boundary,
             summarizer=summarizer,
@@ -137,21 +144,19 @@ class ContextManager:
 
         # 5. Return partials; LangGraph reducers merge them into OceanState.
         return {
-            "summary_messages": new_chunks,  # append_chunks reducer
+            "summary_messages": summarized_messages,  # append_chunks reducer
             "last_processed_message_id": new_bookmark,  # overwrite
         }
 
     # proxy for build view with policy
     def build_view(self, state: Any, policy_key: str) -> list[BaseMessage]:
-        policy = self.policies[policy_key]
+        policy = self._policy(policy_key)
 
         view = build_view(
             state.messages,
-            state.summary_chunks,
+            state.summary_messages,
             state.last_processed_message_id,
             policy.live_tail_size,
             policy.compaction_size_chars
         )
-
-        # 5. Return partials; LangGraph reducers merge them into OceanState.
         return view
