@@ -36,6 +36,12 @@ from core.llm.token_counter import HeuristicTokenCounter
 from core.prompts import PromptRegistry
 from stores.postgres import get_pg_gateway
 
+# The context policy (budget / tail size) this agent graph runs under. Both the
+# summarizer node (to decide what to summarize) and the agent node (to build the
+# view) reference the SAME policy — one conversation, one policy. Must match a key
+# wired in app/context.py, or ContextManager fails loud.
+OCEANS_POLICY = "oceans_agent"
+
 
 def make_summarizer_node(deps: AgentDependencies):
     """
@@ -47,7 +53,7 @@ def make_summarizer_node(deps: AgentDependencies):
     :return:
     """
     role = "summarizer"
-    policy = "oceans_agent"
+    policy = OCEANS_POLICY
     system_prompt = deps.prompt_registry.render(role, {})
     llm_summarizer = deps.llm_registry.get(role)
     summarizer = LLMSummarizer(llm_summarizer, system_prompt)
@@ -75,7 +81,7 @@ def make_agent_node(tools: list, deps: AgentDependencies):
 
     @node_executor("agent_node")
     def agent_node(state: OceanState) -> dict:
-        messages_view = context.build_view(state, "oceans_agent")
+        messages_view = context.build_view(state, OCEANS_POLICY)
         messages = [SystemMessage(system_prompt)] + messages_view
 
         # call the llm and get an AI response back
