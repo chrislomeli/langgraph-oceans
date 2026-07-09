@@ -16,61 +16,98 @@ TIER SPLIT (memory: agentic-division-of-labor)
 
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing import Optional, Literal, Any
 
-from langchain_core.messages import AnyMessage, SystemMessage
+from langchain_core.messages import SystemMessage, AnyMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import START, StateGraph
-from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
-from pydantic import Field
+from pydantic import BaseModel
 
+from agents.sandbox_agent.ocean_state import OceanState
 from agents.tools import TOOLS
 from core.agents import node_executor
 from core.agents.dependencies import AgentDependencies
-from core.agents.node_types import TracedState
 from core.config import get_settings
+from core.context import ContextManager
+from core.context.summarizer import LLMSummarizer
 from core.llm.llm_registry import build_llm_registry, LLMLabel
+from core.llm.token_counter import HeuristicTokenCounter
 from core.prompts import PromptRegistry
 from stores.postgres import get_pg_gateway
 
 
-class OceanState(TracedState):
-    """The agent's graph state.
 
-    Inherits the traced infrastructure fields (session_id, status, error) from
-    TracedState — so `node_executor`'s metrics/error handling actually have a home —
-    and adds the ReAct message channel with the `add_messages` reducer (the same
-    appending behavior LangGraph's MessagesState gives, now on a pydantic base).
+
+def make_summarizer_node(deps: AgentDependencies):
     """
-    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)  # noqa
+    Update the state's summary_chunks and last message id
+     Call the context framework to perform summary and return partials
+     summary_chunks and last message id both come from te mixin
+
+    :param deps:
+    :return:
+    """
+    role = "summarizer"
+    system_prompt = deps.prompt_registry.render(role, {})
+    llm_summarizer = deps.llm_registry.get(role)
+    summarizer = LLMSummarizer(llm_summarizer, system_prompt)
+    context_manager = deps.context_manager
+
+    @node_executor("summarizer_node")
+    def summarizer_node(state: OceanState):
+        # state has summaries, messages, last_ id -- summarize and update them here before calling the agent
+        context_manager.prepare(state=state, policy_key=role, summarizer=summarizer)
+
+        last_item =  state.messages[-1]
+        if isinstance(last_item, ToolMessage):
+            pass
+
+
+    return summarizer_node
 
 
 def make_agent_node(tools: list, deps: AgentDependencies):
     role = "oceans_agent"
+    llm_agent = deps.llm_registry.get(role)
     system_prompt = deps.prompt_registry.render(role, {})
-    llm_base = deps.llm_registry.get(role)
-    llm = llm_base.bind_tools(tools)
+    context = deps.context_manager
 
     @node_executor("agent_node")
     def agent_node(state: OceanState) -> dict:
-        messages = [SystemMessage(system_prompt)] + state.messages
-        return {"messages": [llm.invoke(messages)]}
+
+        messages_view = context.build_view(state, "oceans_agent")
+        messages = [SystemMessage(system_prompt)] + messages_view
+
+        return {"messages": [llm_agent.invoke(messages)]}
 
     return agent_node
+
+
+def route_ai_response(state: list[AnyMessage] | dict[str, Any] | BaseModel, messages_key: str = "messages",) -> Literal["tools", "__end__"]:
+    # tools_condition routes to "tools" or "__end__"
+    next_node =  tools_condition(state,messages_key)
+
+    # perform any additional work
+    return next_node
+
+
 
 
 def build_sandbox_graph(deps: AgentDependencies, saver: Optional[BaseCheckpointSaver] = None):
     """Compile the ReAct graph. Constructing the LLM is cheap (no API call until invoke)."""
 
     b = StateGraph(OceanState)  # noqa  (PyCharm can't match TypedDict to StateT bound)
+    b.add_node("summarizer",
+               make_summarizer_node(deps=deps))  # noqa  (PyCharm can't match TypedDict to StateT bound)
     b.add_node("agents",
                make_agent_node(tools=TOOLS, deps=deps))  # noqa  (PyCharm can't match TypedDict to StateT bound)
     b.add_node("tools", ToolNode(TOOLS))  # all tools as a default
 
-    b.add_edge(START, "agents")
-    b.add_conditional_edges("agents", tools_condition)  # → tools if tool_calls else END
-    b.add_edge("tools", "agents")
+    b.add_edge(START, "summarizer")
+    b.add_edge("summarizer", "agents")
+    b.add_conditional_edges("agents", route_ai_response)  # → use a hof in case we want to pass anything in
+    b.add_edge("tools", "summarizer")
     return b.compile(saver)
 
 
@@ -95,6 +132,7 @@ if __name__ == '__main__':
         prompt_registry=prompt_registry,
         llm_registry=llm_registry,
         data_store=data_store,
+        context_manager=ContextManager(counter=HeuristicTokenCounter())
     )
 
     # saver is irrelevant to draw_ascii (structure only), so omit it — the arg is

@@ -48,6 +48,15 @@ class ContextTooLargeError(ContextBuildError):
             f"Context is {tokens} tokens, still exceeds budget of {budget} after full pruning"
         )
 
+class ContextPolicy(BaseModel):
+    prompt_key: PromptKey = Field(default=PromptKey.CONVERSATION)
+    tags: list[str] = Field(default_factory=list)
+    last_k_session_messages: int = Field(default=DEFAULT_RECENT_MESSAGES_COUNT, ge=0, le=20)
+    last_k_recent_messages: int = Field(default=DEFAULT_SESSION_MESSAGES_COUNT, ge=0, le=20)
+    top_k_retrieved_history: int = Field(default=DEFAULT_RETRIEVED_HISTORY_COUNT, ge=0, le=10)
+    distance_retrieved_history: int = Field(default=DEFAULT_RETRIEVED_HISTORY_DISTANCE, ge=0, le=10)
+    prompt_vars: dict[str, Any] = Field(default_factory=dict)
+
 
 class ContextBuilder:
     """Assemble and budget-fit the message list sent to the LLM.
@@ -67,7 +76,7 @@ class ContextBuilder:
     def get_context(
         self,
         prompt: str,
-        # instruction: ContextSpecification,
+        instruction: ContextPolicy,
         session_messages: list[BaseMessage] | None = None,
         recent_messages: list[BaseMessage] | None = None,
         retrieved_fragments: list[Any] | None = None,

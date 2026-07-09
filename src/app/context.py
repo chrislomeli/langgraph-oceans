@@ -23,7 +23,10 @@ from typing import AsyncIterator
 from app.conversation_service import ConversationService
 from core.agents.dependencies import AgentDependencies
 from core.config import get_settings
+from core.context import ContextManager, ContextPolicy
+from core.context.summarizer import LLMSummarizer
 from core.llm.llm_registry import build_llm_registry, LLMLabel
+from core.llm.token_counter import HeuristicTokenCounter
 from core.prompts import PromptRegistry
 from stores.checkpointer import make_postgres_checkpointer
 from stores.postgres import get_pg_gateway
@@ -42,13 +45,30 @@ async def build_context() -> AsyncIterator[ConversationService]:
         settings=settings,  # deployment config (keys, env)
         role_config={  # the roles THIS app wants, and the model behind each
             "oceans_agent": LLMLabel.OPUS,
+            "context_summarizer": LLMLabel.HAIKU,
         })  # model_catalog defaults to the registry's own `models`
+
     prompt_registry = PromptRegistry()
+
+    context_manager = ContextManager(
+        counter=HeuristicTokenCounter(),  # core/llm — the salvaged counter
+        policies={
+            "oceans_agent": ContextPolicy(
+                chunk_token_budget=2000,  # size of one summarized chunk
+                live_tail_size=6,  # trailing messages never chunked / never compacted
+                compaction_size_chars=1000  # tool results smaller than this are left full
+            )},
+    )
+    # stash on AppContext.deps so the graph builder can reach it
+
+
     caps = AgentDependencies(
         prompt_registry=prompt_registry,
         llm_registry=llm_registry,
         data_store=postgres_gateway,
+        context_manager=context_manager
     )
+
 
     # process-scoped checkpointer (AsyncPostgresSaver). Its `async with` holds the
     # connection pool open for the life of this block, so the pool is torn down only

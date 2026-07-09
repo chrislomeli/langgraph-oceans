@@ -14,6 +14,7 @@ from typing import Optional
 from langgraph.store.base import BaseStore
 from pydantic import BaseModel
 
+from core.context import ContextManager
 from core.llm.llm_registry import LLMRegistry
 from core.prompts import PromptRegistry
 from stores.postgres import PgGateway
@@ -25,4 +26,5 @@ class AgentDependencies(BaseModel):
     llm_registry: LLMRegistry
     prompt_registry: PromptRegistry
     data_store: PgGateway
+    context_manager: ContextManager
     store: Optional[BaseStore] = None
