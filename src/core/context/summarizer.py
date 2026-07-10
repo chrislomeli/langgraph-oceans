@@ -29,11 +29,10 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from core.context.protocols import Summarizer, TokenCounter
 from core.context.chunking import Boundary, _is_prose
-from core.context.state import SummaryChunk
+from core.context.protocols import Summarizer, TokenCounter
 
 
 def summarize_messages(

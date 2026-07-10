@@ -61,19 +61,10 @@ class RetentionPolicy(str, Enum):
 
 
 def resolve_retention(
-    tool_name: str | None,
-    policies: Mapping[str, RetentionPolicy],
+        tool_name: str | None,
+        policies: Mapping[str, RetentionPolicy],
 ) -> RetentionPolicy:
     """Look up a tool's policy; unknown or None → CHECKPOINT (the safe default)."""
-    raise NotImplementedError
-
-
-def tool_name_of(message: ToolMessage, messages: Sequence[BaseMessage]) -> str | None:
-    """Resolve which tool produced a ToolMessage.
-
-    Prefer `message.name` when present; otherwise match `message.tool_call_id` back
-    to the originating AIMessage.tool_calls entry in `messages` and read its name.
-    """
     raise NotImplementedError
 
 
