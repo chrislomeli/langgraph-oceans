@@ -23,17 +23,17 @@ state, so a resumed thread continues from the bookmark rather than re-summarizin
 
 Wiring sketch (lives in the graph, not here):
 
-    context = ContextManager(counter, policies)
+    context = ContextManager(summarizer, policy=ContextPolicy(...))
 
     def summary_node(state: OceanState) -> dict:
-        return context.prepare(state, policy_key="oceans_agent", summarizer=summarizer)
+        return context.prepare(state)          # summarizer + policy already held
 
-    graph.add_node("summarize", summary_node)   # before the agent node
+    graph.add_node("summarize", summary_node)  # before the agent node
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, Field
@@ -43,6 +43,7 @@ from core.context.compaction import brief_tools
 from core.context.protocols import Summarizer, TokenCounter
 from core.context.retention import RetentionPolicy
 from core.context.summarizer import summarize_messages
+from core.context.token_counter import HeuristicTokenCounter
 from core.context.view_builder import build_view
 
 
@@ -83,20 +84,44 @@ class ContextManager:
 
     def __init__(
             self,
-            counter: TokenCounter,
-            policies: Optional[dict[str, ContextPolicy]] = None,
+            summarizer: Summarizer,
+            policy: ContextPolicy | None = None,
+            *,
+            policies: dict[str, ContextPolicy] | None = None,
+            counter: TokenCounter | None = None,
     ) -> None:
-        self.counter = counter
-        self.policies = policies or dict(default=ContextPolicy())
+        """Wire the module once.
 
-    def _policy(self, policy_key: str) -> ContextPolicy:
-        """Resolve a policy by key, or FAIL LOUD if it isn't configured.
-
-        Deliberately no fallback: a missing policy is a wiring bug (the caller passed
-        a key the composition root never wired). Defaulting to an arbitrary policy
-        would silently summarize/build-view with the wrong budget — worse than a
-        crash. Callers pass the correct key; if it's absent, say so clearly.
+        summarizer  the model adapter that turns aged prose into summaries (the one
+                    dependency the module can't default — it needs a model + prompt).
+        policy      a single ContextPolicy — the common case. prepare/build_view then
+                    need no policy_key.
+        policies    OR a name→policy map for the advanced "one manager, several agents"
+                    case; then pass policy_key each call. Give exactly one of the two.
+        counter     token estimator; defaults to the built-in HeuristicTokenCounter,
+                    so the module is self-contained. Inject one to use an exact tokenizer.
         """
+        if (policy is None) == (policies is None):
+            raise ValueError("pass exactly one of `policy=` or `policies=`")
+        self.policies = {"default": policy} if policy is not None else dict(policies)
+        self.summarizer = summarizer
+        self.counter = counter or HeuristicTokenCounter()
+
+    def _policy(self, policy_key: str | None) -> ContextPolicy:
+        """Resolve the policy, or FAIL LOUD.
+
+        policy_key is optional when a single policy was configured (the common case).
+        With multiple policies it's required. A key that isn't configured is a wiring
+        bug — no silent fallback to an arbitrary policy (that would summarize/build-view
+        with the wrong budget, worse than a crash).
+        """
+        if policy_key is None:
+            if len(self.policies) == 1:
+                return next(iter(self.policies.values()))
+            raise KeyError(
+                f"{len(self.policies)} policies configured {list(self.policies)}; "
+                "pass policy_key= to choose one"
+            )
         try:
             return self.policies[policy_key]
         except KeyError:
@@ -104,9 +129,7 @@ class ContextManager:
                 f"No context policy {policy_key!r}. Configured: {list(self.policies)}"
             ) from None
 
-    def prepare(
-            self, state: Any, policy_key: str, summarizer: Summarizer
-    ) -> dict[str, Any]:
+    def prepare(self, state: Any, policy_key: str | None = None) -> dict[str, Any]:
         """Run the per-turn dance; return a durable state-update dict for the graph.
 
         Reads from state: messages, tool_calls, last_processed_message_id.
@@ -146,7 +169,7 @@ class ContextManager:
         summarized_messages: list[HumanMessage] = summarize_messages(
             messages=messages,
             boundary=boundary,
-            summarizer=summarizer,
+            summarizer=self.summarizer,
             counter=self.counter)
 
         # 4. Brief the slice's tool calls. Seed ordinals from the count already in
@@ -165,17 +188,19 @@ class ContextManager:
             "last_processed_message_id": new_bookmark,   # plain overwrite
         }
 
-    # proxy for build view with policy
     def build_view(self, state: Any, policy_key: str | None = None) -> list[BaseMessage]:
-        # Pass the injected counter + the policy's ceiling so build_view can enforce
-        # the HARD limit. policy_key omitted ⇒ ceiling None ⇒ fitting stays OFF (the
-        # current behavior); pass OCEANS_POLICY from the agent node to activate it.
-        ceiling = self._policy(policy_key).view_token_ceiling if policy_key else None
+        """Assemble the ephemeral per-call view from state. Never mutates state.
+
+        Threads the injected counter + the policy's view_token_ceiling into build_view.
+        The ceiling governs fitting: None (the policy default) ⇒ fitting OFF; set it on
+        the policy to enforce the HARD limit. policy_key is optional for a single policy.
+        """
+        policy = self._policy(policy_key)
         return build_view(
             messages=state.messages,
             message_summaries=state.message_summaries,
             tool_calls=state.tool_calls,
             last_processed_message_id=state.last_processed_message_id,
             counter=self.counter,
-            view_token_ceiling=ceiling,
+            view_token_ceiling=policy.view_token_ceiling,
         )

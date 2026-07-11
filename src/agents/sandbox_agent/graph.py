@@ -29,43 +29,23 @@ from agents.tools import TOOLS
 from core.agents import node_executor
 from core.agents.dependencies import AgentDependencies
 from core.config import get_settings
-from core.context import ContextManager
-from core.context.summarizer import LLMSummarizer
+from core.context import ContextManager, ContextPolicy, LLMSummarizer
 from core.llm.llm_registry import build_llm_registry, LLMLabel
-from core.llm.token_counter import HeuristicTokenCounter
 from core.prompts import PromptRegistry
 from stores.postgres import get_pg_gateway
 
-# The context policy (budget / tail size) this agent graph runs under. Both the
-# summarizer node (to decide what to summarize) and the agent node (to build the
-# view) reference the SAME policy — one conversation, one policy. Must match a key
-# wired in app/context.py, or ContextManager fails loud.
-OCEANS_POLICY = "oceans_agent"
-
 
 def make_summarizer_node(deps: AgentDependencies):
-    """
-    Update the state's summary_chunks and last message id
-     Call the context framework to perform summary and return partials
-     summary_chunks and last message id both come from te mixin
+    """Update the durable shadow state (summaries + tool briefs) before the agent runs.
 
-    :param deps:
-    :return:
+    All the work — and the summarizer + policy — live on the injected ContextManager,
+    so this node is just the graph seam that calls prepare(state).
     """
-    role = "summarizer"
-    policy = OCEANS_POLICY
-    system_prompt = deps.prompt_registry.render(role, {})
-    llm_summarizer = deps.llm_registry.get(role)
-    summarizer = LLMSummarizer(llm_summarizer, system_prompt)
     context_manager = deps.context_manager
 
     @node_executor("summarizer_node")
     def summarizer_node(state: OceanState):
-        # todo: do any tool compaction here? or in a separate node?
-
-        # state has summaries, messages, last_ id -- summarize and update them here before calling the agent
-        return context_manager.prepare(state=state, policy_key=policy, summarizer=summarizer)
-
+        return context_manager.prepare(state)
 
     return summarizer_node
 
@@ -147,11 +127,12 @@ if __name__ == '__main__':
     prompt_registry = PromptRegistry()
 
     # create the composite dependencies that we'll inject to graphs
+    summarizer = LLMSummarizer(llm_registry.get("summarizer"), prompt_registry.render("summarizer", {}))
     agent_dependencies = AgentDependencies(
         prompt_registry=prompt_registry,
         llm_registry=llm_registry,
         data_store=data_store,
-        context_manager=ContextManager(counter=HeuristicTokenCounter())
+        context_manager=ContextManager(summarizer, policy=ContextPolicy()),
     )
 
     # saver is irrelevant to draw_ascii (structure only), so omit it — the arg is

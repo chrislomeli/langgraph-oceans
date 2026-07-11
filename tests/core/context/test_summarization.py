@@ -23,7 +23,7 @@ import pytest
 from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from core.context import ContextManager, ContextPolicy
+from core.context import ContextManager, ContextPolicy, HeuristicTokenCounter
 from core.context.chunking import Boundary, _is_prose, index_after_bookmark, next_boundary
 from core.context.compaction import brief_tools
 from core.context.state import ContextStateFields, ToolBrief, update_dict
@@ -218,16 +218,18 @@ def test_summarize_messages_no_prose_returns_empty_and_skips_the_model():
 
 # ── ContextManager.prepare (orchestration) ───────────────────────────────────
 
-def _manager(budget=15, live_tail=1) -> ContextManager:
+def _manager(summarizer=None, budget=15, live_tail=1) -> ContextManager:
+    # summarizer + policy now live ON the manager; counter is injected for exact budgets.
     return ContextManager(
-        FakeCounter(),
-        {"oceans_agent": ContextPolicy(chunk_token_budget=budget, live_tail_size=live_tail)},
+        summarizer or FakeSummarizer(["S"]),
+        policy=ContextPolicy(chunk_token_budget=budget, live_tail_size=live_tail),
+        counter=FakeCounter(),
     )
 
 
 def test_prepare_over_budget_returns_chunk_and_advances_bookmark():
     state = FakeState([H("h1"), A("a1"), H("h2"), A("a2"), H("hot")])
-    out = _manager().prepare(state, "oceans_agent", FakeSummarizer(["S"]))
+    out = _manager().prepare(state)
 
     assert set(out) == {"tool_calls", "message_summaries", "last_processed_message_id"}
     assert out["last_processed_message_id"] == "a1"      # boundary end (h1+a1 crossed 15)
@@ -237,13 +239,31 @@ def test_prepare_over_budget_returns_chunk_and_advances_bookmark():
 
 def test_prepare_under_budget_is_a_noop():
     state = FakeState([H("h1"), H("hot")])
-    assert _manager().prepare(state, "oceans_agent", FakeSummarizer(["S"])) == {}
+    assert _manager().prepare(state) == {}
 
 
 def test_prepare_unknown_policy_fails_loud():
     state = FakeState([H("h1"), A("a1")])
     with pytest.raises(KeyError):
-        _manager().prepare(state, "does-not-exist", FakeSummarizer(["S"]))
+        _manager().prepare(state, "does-not-exist")   # key not among the configured policies
+
+
+def test_manager_requires_exactly_one_of_policy_or_policies():
+    with pytest.raises(ValueError):
+        ContextManager(FakeSummarizer([]))                                          # neither
+    with pytest.raises(ValueError):
+        ContextManager(FakeSummarizer([]), policy=ContextPolicy(), policies={"k": ContextPolicy()})  # both
+
+
+def test_manager_multiple_policies_require_a_key():
+    mgr = ContextManager(FakeSummarizer(["S"]), policies={"a": ContextPolicy(), "b": ContextPolicy()})
+    with pytest.raises(KeyError):
+        mgr.prepare(FakeState([H("h1"), H("hot")]))   # ambiguous — no policy_key
+
+
+def test_manager_defaults_the_token_counter():
+    mgr = ContextManager(FakeSummarizer([]), policy=ContextPolicy())
+    assert isinstance(mgr.counter, HeuristicTokenCounter)
 
 
 # ── build_view (assembly) ────────────────────────────────────────────────────
@@ -441,7 +461,7 @@ def _slice_with_a_tool_pair():
 
 
 def test_prepare_briefs_the_tools_in_the_summarized_slice():
-    out = _manager().prepare(FakeState(_slice_with_a_tool_pair()), "oceans_agent", FakeSummarizer(["S"]))
+    out = _manager().prepare(FakeState(_slice_with_a_tool_pair()))
     assert "c1" in out["tool_calls"]
     assert out["tool_calls"]["c1"].summary == "rrrrr"
     assert out["tool_calls"]["c1"].ordinal == 0     # seeded from an empty state
@@ -450,21 +470,25 @@ def test_prepare_briefs_the_tools_in_the_summarized_slice():
 def test_prepare_seeds_ordinals_from_existing_tool_calls():
     prior = {"x": _brief("x", 0), "y": _brief("y", 1)}
     state = FakeState(_slice_with_a_tool_pair(), tool_calls=prior)
-    out = _manager().prepare(state, "oceans_agent", FakeSummarizer(["S"]))
+    out = _manager().prepare(state)
     assert out["tool_calls"]["c1"].ordinal == 2     # len(prior) == 2 → strictly newer
 
 
 # ── ContextManager.build_view proxy (threads counter + policy ceiling) ────────
 
+def _view_manager(policy: ContextPolicy) -> ContextManager:
+    return ContextManager(FakeSummarizer([]), policy=policy, counter=FakeCounter())
+
+
 def test_manager_build_view_applies_the_policy_ceiling():
-    mgr = ContextManager(FakeCounter(), {"k": ContextPolicy(view_token_ceiling=20)})
+    mgr = _view_manager(ContextPolicy(view_token_ceiling=20))
     state = FakeState([H("h1", 10)], message_summaries=[H("s1", 10)], tool_calls={"c1": _brief("c1", 0)})
-    view = mgr.build_view(state, "k")
-    assert ids(view) == ["s1", "h1"]  # ceiling threaded → manifest shed
+    view = mgr.build_view(state)
+    assert ids(view) == ["s1", "h1"]  # ceiling threaded from policy → manifest shed
 
 
-def test_manager_build_view_without_policy_key_leaves_fitting_off():
-    mgr = ContextManager(FakeCounter(), {"k": ContextPolicy(view_token_ceiling=1)})
+def test_manager_build_view_no_ceiling_keeps_the_manifest():
+    mgr = _view_manager(ContextPolicy(view_token_ceiling=None))
     state = FakeState([H("h1", 10)], tool_calls={"c1": _brief("c1", 0)})
-    view = mgr.build_view(state)      # no policy_key ⇒ ceiling None ⇒ no fitting
+    view = mgr.build_view(state)      # policy ceiling None ⇒ fitting OFF
     assert isinstance(view[0], HumanMessage) and "Tools already called" in view[0].content

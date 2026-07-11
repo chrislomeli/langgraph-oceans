@@ -11,12 +11,19 @@ submodule when you need it.
 from core.context.manager import ContextPolicy, ContextManager
 from core.context.protocols import Summarizer, TokenCounter, ToolResultStore
 from core.context.retention import RetentionPolicy
+from core.context.state import ContextStateFields, ToolBrief
+from core.context.summarizer import LLMSummarizer
+from core.context.token_counter import HeuristicTokenCounter
 
 
 __all__ = [
     "ContextManager",
     "ContextPolicy",
+    "ContextStateFields",
+    "HeuristicTokenCounter",
+    "LLMSummarizer",
     "RetentionPolicy",
+    "ToolBrief",
     "TokenCounter",
     "Summarizer",
     "ToolResultStore",

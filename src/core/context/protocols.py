@@ -22,7 +22,7 @@ from langchain_core.messages import BaseMessage
 
 @runtime_checkable
 class TokenCounter(Protocol):
-    """Pre-call token estimation. Satisfied by core.llm.HeuristicTokenCounter."""
+    """Pre-call token estimation. The module's default impl is HeuristicTokenCounter."""
 
     def count_messages(self, messages: Sequence[BaseMessage]) -> int: ...
 

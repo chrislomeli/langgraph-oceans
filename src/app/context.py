@@ -23,10 +23,8 @@ from typing import AsyncIterator
 from app.conversation_service import ConversationService
 from core.agents.dependencies import AgentDependencies
 from core.config import get_settings
-from core.context import ContextManager, ContextPolicy
-from core.context.summarizer import LLMSummarizer
+from core.context import ContextManager, ContextPolicy, LLMSummarizer
 from core.llm.llm_registry import build_llm_registry, LLMLabel
-from core.llm.token_counter import HeuristicTokenCounter
 from core.prompts import PromptRegistry
 from stores.checkpointer import make_postgres_checkpointer
 from stores.postgres import get_pg_gateway
@@ -50,14 +48,19 @@ async def build_context() -> AsyncIterator[ConversationService]:
 
     prompt_registry = PromptRegistry()
 
+    # the one dependency the context module can't default: a summarizer (cheap model
+    # + the summarizer prompt). The token counter defaults to the module's built-in.
+    summarizer = LLMSummarizer(
+        llm_registry.get("summarizer"),
+        prompt_registry.render("summarizer", {}),
+    )
     context_manager = ContextManager(
-        counter=HeuristicTokenCounter(),  # core/llm — the salvaged counter
-        policies={
-            "oceans_agent": ContextPolicy(
-                chunk_token_budget=2000,  # size of one summarized chunk
-                live_tail_size=6,  # trailing messages never chunked / never compacted
-                compaction_size_chars=1000  # tool results smaller than this are left full
-            )},
+        summarizer,
+        policy=ContextPolicy(
+            chunk_token_budget=2000,    # target prose tokens per summarized slice
+            live_tail_size=6,           # trailing messages never summarized
+            compaction_size_chars=1000  # max chars kept of each tool result in its brief
+        ),
     )
     # stash on AppContext.deps so the graph builder can reach it
 

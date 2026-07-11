@@ -5,6 +5,7 @@ from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages  # same one graph.py used
 from pydantic import Field
 
+
 class OceanState(TracedState, ContextStateFields):
     """The agent's graph state.
 
