@@ -1,21 +1,20 @@
 """summarizer.py — LLM summarization of PROSE. Tools are never summarized.
 
 After the stream split, summarization has one job: turn aged human/AI PROSE into
-durable SummaryChunk(s). Tool results are NOT its concern — they're shown as
-manifest lines (extract + ref) and never folded into a summary. So there's no
-ref-preservation contract here: summaries carry no refs.
+durable framed summary HumanMessage(s). Tool results are NOT its concern — they're
+handled on the tool side (brief_tools → the manifest) and never folded into a summary.
 
-    tool traceability  → manifest (build_tool_manifest) + resolve_full_tool_result
-    prose traceability → SummaryChunk.message_ids point straight at the source
+    tool traceability  → the tool manifest (a leading HumanMessage of ToolBriefs)
+    prose traceability → the summary restates the salient facts in the agent's words
 
 Specific tool-derived facts survive because the AGENT'S OWN prose restated them
 ("I found the top match is #479") — that prose is what we summarize; the full tool
-payload stays one manifest ref away.
+payload stays untouched in the log.
 
 TWO PIECES:
-  - summarize_chunk(...)  — module logic: slice, FILTER to prose, call the model,
-    package into SummaryChunk(s). Returns a list (segmentation is a saved point;
-    for now it's always one chunk).
+  - summarize_messages(...) — module logic: slice, FILTER to prose, call the model,
+    frame the result as summary HumanMessage(s). Returns a list (topical segmentation
+    is a saved point; for now it's always one).
   - LLMSummarizer         — the injected model adapter. It holds the model AND the
     "summarizer" system prompt (rendered from the prompt registry in the graph and
     passed in — the structured-field instructions live in THAT template, not here,
@@ -41,31 +40,31 @@ def summarize_messages(
         summarizer: Summarizer,
         counter: TokenCounter,
 ) -> list[HumanMessage]:
-    """Summarize the PROSE in `boundary` into one SummaryChunk (list for future
-    segmentation).
+    """Summarize the PROSE in `boundary` into framed summary HumanMessage(s).
 
     Args:
         messages:   full log; sliced by boundary.start_index..end_index.
         boundary:   a prose-sized contiguous slice (chunking.next_boundary).
         summarizer: injected model adapter (Summarizer protocol).
-        counter:    fills token_count_estimate = tokens of the produced summary_text.
+        counter:    used to stamp each summary's token count in additional_kwargs.
 
-    The chunk's message_ids are the WHOLE contiguous range (matches start/end and
-    the advancing bookmark); the summary TEXT is of the prose within — tool messages
-    in the range are covered by the manifest, not re-described here. Input-only:
-    never reads from or writes to `messages`.
+    Filters the slice to prose and summarizes only that — tool messages in the range
+    are briefed separately (compaction) and shown in the manifest, not re-described
+    here. Each summary is framed as a HumanMessage (a custom role isn't wire-valid;
+    see view_builder). Returns a list for future topical segmentation; today it's one.
+    Input-only: never reads from or writes to `messages`.
     """
     slice_ = messages[boundary.start_index: boundary.end_index + 1]
     prose = [m for m in slice_ if _is_prose(m)]
     if not prose:
         return []  # next_boundary guarantees prose; defensive no-op otherwise
 
-    summary_chunks: list[str] =  summarizer.summarize(prose)
+    summary_texts: list[str] = summarizer.summarize(prose)
 
-    # transform to human messages
+    # frame each summary string as a wire-valid HumanMessage
     def make_summary_message(summary: str) -> HumanMessage:
         return HumanMessage(
-            id= uuid4().hex,
+            id=uuid4().hex,
             content=f"[Summary of earlier conversation]:\n{summary}",
             additional_kwargs={
                 "kind": "summary",
@@ -74,8 +73,7 @@ def summarize_messages(
             },
         )
 
-    summary_messages = [make_summary_message(c) for c in summary_chunks]
-    return summary_messages
+    return [make_summary_message(text) for text in summary_texts]
 
 
 class LLMSummarizer:

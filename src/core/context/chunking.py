@@ -1,8 +1,9 @@
 """chunking.py — Boundary detection for PROSE summarization. Pure, no I/O, no LLM.
 
-Simplified once we separated the streams: tools are handled entirely by compaction
-+ manifest and are NEVER summarized, so summarization sees prose only. That removes
-the one hard part this module used to carry — tool-pair safety — from the boundary.
+Simplified once we separated the streams: tools are briefed by compaction (and shown
+in the view's manifest) and are NEVER summarized, so summarization sees prose only.
+That removes the one hard part this module used to carry — tool-pair safety — from
+the boundary.
 
 What's left is just a size decision:
 
@@ -10,9 +11,9 @@ What's left is just a size decision:
   until ~budget, and cut. No forward-walk-to-close-pairs, no orphan checks — there
   are no pairs in prose to split.
 
-Pair-safety didn't vanish from the system, it RELOCATED: the only structural tool
-pairs the view ever sends live in the HOT window, so `validate_no_orphans` now
-guards that window's leading edge (used by view_builder), not the summary boundary.
+Pair-safety didn't vanish from the system, it RELOCATED to view_builder: when the
+fitter trims the tail it drops any leading orphan ToolMessage (_fit_tail), so the
+summary boundary here carries no pair concern at all.
 """
 
 from __future__ import annotations
@@ -30,8 +31,9 @@ class Boundary(BaseModel):
 
     Frozen: a computed value object, not mutable state. The range is contiguous in
     `messages`; it MAY contain interspersed tool messages (they ride along under the
-    advancing bookmark) but the summarizer will filter to prose. `message_ids` are
-    the durable handles that go into the SummaryChunk.
+    advancing bookmark) but the summarizer filters to prose and brief_tools takes the
+    tools. `message_ids` are durable id handles for the covered range (tracing/tests);
+    `end_message_id` becomes the new bookmark.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -131,16 +133,3 @@ def next_boundary(
         end_message_id=covered[-1].id,
         message_ids=[m.id for m in covered],
     )
-
-
-def validate_no_orphans(messages: Sequence[BaseMessage]) -> list[str]:
-    """Return tool_call_ids opened but not closed (or vice versa) within a slice.
-
-    Collects every tool_call_id in AIMessage.tool_calls and every tool_call_id on a
-    ToolMessage, and returns the symmetric difference. Empty == pair-complete.
-
-    New home: view_builder uses this to verify the HOT window's leading edge is
-    pair-complete (extend the window back to close any straddling pair). It is NO
-    LONGER used on the summary boundary — summaries don't carry structural pairs.
-    """
-    raise NotImplementedError

@@ -33,14 +33,14 @@ reproduce the result? If no, EXTERNAL — eviction would turn the traceability
 invariant into a lie for exactly the data most likely to matter.
 
 WHERE THIS WOULD PLUG IN (currently a no-op): the orchestrator applies retention at
-COLD/summarization time — right after summarize_chunk captures the conclusion, the
+COLD/summarization time — right after summarize_messages captures the conclusion, the
 full body's residual value drops to ~0. EXTERNAL/EPHEMERAL are the ONLY paths that
 durably touch `messages`, via an add_messages upsert-by-id (same message id) that
 replaces the content with a stub/tombstone. (Externalizing a known-huge tool at
 tool-CALL time is the other valid trigger — same policy, earlier clock.)
 
 DECLARE in the domain (tool ads) / WIRE in the app (assemble the name→policy map
-into ContextConfig.tool_retention). core/ stays domain-agnostic: it knows only the
+into ContextPolicy.tool_retention). core/ stays domain-agnostic: it knows only the
 enum and the map it is handed.
 """
 
@@ -73,8 +73,8 @@ def externalize(message: ToolMessage, store: ToolResultStore) -> ToolMessage:
 
     store.put(ref, full); return a NEW ToolMessage with the SAME id and
     tool_call_id and content = extract + ref. Emitted back into `messages` via
-    add_messages upsert (same id) — this DURABLY shrinks the checkpoint. Retrieval
-    (resolve_full_tool_result) then finds the payload in the store.
+    add_messages upsert (same id) — this DURABLY shrinks the checkpoint. A retrieval
+    tool (not built) would then read the payload back from the store by ref.
     """
     raise NotImplementedError
 
@@ -84,8 +84,7 @@ def evict_to_tombstone(message: ToolMessage) -> ToolMessage:
 
     Return a NEW ToolMessage, SAME id and tool_call_id, content =
     "<tool> result not retained (ref_...); re-call to refresh". Emitted back via
-    add_messages upsert. After this the ref no longer resolves — the tombstone (and
-    its manifest line, once we add the manifest) is the agent's only trace that the
-    call happened.
+    add_messages upsert. After this the full payload is gone — the tombstone (and the
+    call's manifest brief) is the agent's only trace that the call happened.
     """
     raise NotImplementedError

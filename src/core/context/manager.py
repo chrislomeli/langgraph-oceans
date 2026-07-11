@@ -4,17 +4,19 @@ The real work of the module lands here. The summary node wired into the graph is
 thin wrapper (see below); this class holds the injected collaborators and runs the
 per-turn dance.
 
-PER-TURN DANCE:
+PER-TURN DANCE (prepare):
   1. next_boundary carves the next PROSE slice from state — and it IS the gate:
      it returns None when there isn't a budget's worth of un-summarized prose yet.
-  2. None => don't summarize; still build the view (summaries + manifest + tail),
-     so existing chunks always apply. Unified path.
-  3. Otherwise summarize the slice -> SummaryChunk(s), advance the bookmark.
-  4. Always return the view on `llm_input_messages`; the only DURABLE writes are the
-     new chunk(s) and the advanced bookmark.
+  2. None => nothing aged out this turn; return {} (no durable change). The agent
+     node builds the view itself via build_view — prepare never builds a view.
+  3. Otherwise: summarize the slice's prose into framed summary HumanMessage(s) AND
+     brief its tool calls (brief_tools), then advance the bookmark.
+  4. Return only the DURABLE deltas — message_summaries, tool_calls, and the new
+     bookmark. `messages` is never touched.
 
-Compaction/manifest are ephemeral and live inside build_view, so `prepare` never
-returns tool state — only a chunk delta and the bookmark.
+View assembly is separate and ephemeral: the agent node calls build_view(state),
+which recomputes the [manifest] + [summaries] + [tail] view every turn from this
+state. prepare produces the durable inputs; build_view consumes them.
 
 CHECKPOINT-RESUME SAFE: everything keys off last_processed_message_id read from
 state, so a resumed thread continues from the bookmark rather than re-summarizing.
@@ -24,20 +26,20 @@ Wiring sketch (lives in the graph, not here):
     context = ContextManager(counter, policies)
 
     def summary_node(state: OceanState) -> dict:
-        return context.prepare(state, policy_key="default", summarizer=summarizer)
+        return context.prepare(state, policy_key="oceans_agent", summarizer=summarizer)
 
-    graph.add_node("summarize", summary_node)   # pre_model_hook / before agent
+    graph.add_node("summarize", summary_node)   # before the agent node
 """
 
 from __future__ import annotations
 
-from itertools import count
 from typing import Any, Optional
 
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, Field
 
 from core.context.chunking import next_boundary
+from core.context.compaction import brief_tools
 from core.context.protocols import Summarizer, TokenCounter
 from core.context.retention import RetentionPolicy
 from core.context.summarizer import summarize_messages
@@ -48,12 +50,17 @@ class ContextPolicy(BaseModel):
     """Tunables for the per-turn policy. Every open-question dial lives here.
 
     chunk_token_budget      target prose tokens per summarized slice (the gate).
+                            SOFT: shapes the steady state, not a guarantee.
     live_tail_size          trailing messages kept HOT: never summarized; tools
-                            here stay full+structural.
-    compaction_size_chars   max length of a manifest line's extract.
-    view_token_ceiling      optional Q2 overflow guard for the assembled view;
-                            summaries-of-summaries are a NON-GOAL, so this only
-                            warns/raises rather than compressing further.
+                            here stay full+structural. SOFT.
+    compaction_size_chars   max chars kept of each tool result in its brief
+                            (brief_tools truncates the brief's summary to this).
+    view_token_ceiling      the HARD ceiling on the assembled view. Enforced every
+                            call by build_view's fitter cascade (shed manifest →
+                            summaries → tail, current turn protected). The soft dials
+                            above are the STARTING POINT; this is the backstop that
+                            makes the view always fit. None ⇒ fitting OFF (no ceiling).
+                            Ephemeral only — sheds from the outgoing list, never state.
     """
     chunk_token_budget: int = Field(default=2000, ge=1)
     live_tail_size: int = Field(default=6, ge=0)
@@ -100,19 +107,19 @@ class ContextManager:
     def prepare(
             self, state: Any, policy_key: str, summarizer: Summarizer
     ) -> dict[str, Any]:
-        """Run the per-turn dance; return a state-update dict for the graph.
+        """Run the per-turn dance; return a durable state-update dict for the graph.
 
-        Reads from state: messages, summary_chunks, last_processed_message_id.
+        Reads from state: messages, tool_calls, last_processed_message_id.
 
-        Returns a dict that may contain:
-          - "llm_input_messages": the ephemeral view (ALWAYS present).
-          - "summary_chunks":     new chunk(s) — only when we summarized; the
-                                  append_chunks reducer merges them in.
-          - "last_processed_message_id": advanced bookmark — only when we summarized.
+        Returns {} when nothing aged out this turn, otherwise the durable deltas:
+          - "message_summaries":          new framed summary HumanMessage(s), merged
+                                          by the add_messages reducer.
+          - "tool_calls":                 new tool briefs, merged by update_dict.
+          - "last_processed_message_id":  the advanced bookmark (plain overwrite).
 
-        Never returns anything under "messages" — the ground-truth log is untouched.
-        Idempotent under checkpoint resume: no new chunk when there isn't a budget's
-        worth of un-summarized prose.
+        Never returns "messages" (the ground-truth log is untouched) and never returns
+        the view (that's build_view, called separately by the agent node). Idempotent
+        under checkpoint resume: no delta when there isn't a budget's worth of prose.
         """
         policy = self._policy(policy_key)
         messages = state.messages
@@ -133,7 +140,8 @@ class ContextManager:
         if boundary is None:
             return {}
 
-        # 3. Summarize the slice into one or more chunks; advance the bookmark to the
+        # 3. Summarize the slice's prose into framed summary message(s); the new
+        #    bookmark advances to the slice end so we never re-summarize it.
         new_bookmark = boundary.end_message_id
         summarized_messages: list[HumanMessage] = summarize_messages(
             messages=messages,
@@ -141,22 +149,33 @@ class ContextManager:
             summarizer=summarizer,
             counter=self.counter)
 
+        # 4. Brief the slice's tool calls. Seed ordinals from the count already in
+        #    state (briefs are append-only) so each sweep's briefs are strictly newer.
+        compacted_tool_calls = brief_tools(
+            messages=messages,
+            boundary=boundary,
+            max_chars=policy.compaction_size_chars,
+            base_ordinal=len(state.tool_calls),
+        )
 
-        # 5. Return partials; LangGraph reducers merge them into OceanState.
+        # 5. Return the durable deltas; LangGraph reducers merge them into the state.
         return {
-            "summary_messages": summarized_messages,  # append_chunks reducer
-            "last_processed_message_id": new_bookmark,  # overwrite
+            "tool_calls": compacted_tool_calls,          # update_dict reducer
+            "message_summaries": summarized_messages,    # add_messages reducer
+            "last_processed_message_id": new_bookmark,   # plain overwrite
         }
 
     # proxy for build view with policy
-    def build_view(self, state: Any, policy_key: str) -> list[BaseMessage]:
-        policy = self._policy(policy_key)
-
-        view = build_view(
-            state.messages,
-            state.summary_messages,
-            state.last_processed_message_id,
-            policy.live_tail_size,
-            policy.compaction_size_chars
+    def build_view(self, state: Any, policy_key: str | None = None) -> list[BaseMessage]:
+        # Pass the injected counter + the policy's ceiling so build_view can enforce
+        # the HARD limit. policy_key omitted ⇒ ceiling None ⇒ fitting stays OFF (the
+        # current behavior); pass OCEANS_POLICY from the agent node to activate it.
+        ceiling = self._policy(policy_key).view_token_ceiling if policy_key else None
+        return build_view(
+            messages=state.messages,
+            message_summaries=state.message_summaries,
+            tool_calls=state.tool_calls,
+            last_processed_message_id=state.last_processed_message_id,
+            counter=self.counter,
+            view_token_ceiling=ceiling,
         )
-        return view

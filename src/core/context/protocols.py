@@ -19,8 +19,6 @@ from typing import Any, Protocol, runtime_checkable
 
 from langchain_core.messages import BaseMessage
 
-from core.context.state import SummaryChunk
-
 
 @runtime_checkable
 class TokenCounter(Protocol):
@@ -45,17 +43,15 @@ class Summarizer(Protocol):
 
 @runtime_checkable
 class ToolResultStore(Protocol):
-    """OPTIONAL external home for full tool payloads.
+    """OPTIONAL external home for full tool payloads. Not wired yet.
 
-    Not used by default. Because compaction is view-time and `messages` is never
-    mutated, the full tool payload already lives in `messages` — the default
-    dereference path (compaction.resolve_full_tool_result) reads it straight from
-    there, no store required.
+    Not used by default: because `messages` is never mutated, the full tool payload
+    always stays in the log — no store is required to reach it.
 
-    This Protocol exists only as the seam for the case where you want large blobs
-    OUT of the checkpoint (DB/blob storage). Provide an implementation to
-    build_get_full_tool_result_tool(...) and it will be consulted first — design
-    open question #3.
+    This Protocol is the seam for the MEMORY axis (retention.py): the case where you
+    want large blobs OUT of the checkpoint (DB/blob storage). retention.externalize
+    would put() the payload here and leave a stub in `messages`. Until retention is
+    wired, nothing consults it.
     """
 
     def put(self, ref_id: str, payload: Any) -> None: ...

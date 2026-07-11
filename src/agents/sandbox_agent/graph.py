@@ -81,7 +81,7 @@ def make_agent_node(tools: list, deps: AgentDependencies):
 
     @node_executor("agent_node")
     def agent_node(state: OceanState) -> dict:
-        messages_view = context.build_view(state, OCEANS_POLICY)
+        messages_view = context.build_view(state)
         messages = [SystemMessage(system_prompt)] + messages_view
 
         # call the llm and get an AI response back
